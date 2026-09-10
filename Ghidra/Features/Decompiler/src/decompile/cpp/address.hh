@@ -595,9 +595,11 @@ inline uintb minimalmask(uintb val)
 inline intb sign_extend(intb val,int4 bit)
 
 {
-  int4 sa = 8*sizeof(intb) - (bit+1);
-  val = (val << sa) >> sa;
-  return val;
+  uintb signmask = (uintb)1 << bit;
+  uintb res = (uintb)val & (signmask - 1);
+  if (((uintb)val & signmask) != 0)
+    res |= ~(signmask - 1);
+  return (intb)res;
 }
 
 /// \brief Clear all bits above given bit
