@@ -45,7 +45,7 @@ private:
     int4 handle_index;		// Place holder for run-time determined value
   } value;
   uintb value_real;
-  v_field select;		// Which part of handle to use as constant
+  v_field select = v_space;	// Which part of handle to use as constant
 public:
   ConstTpl(void) { type = real; value_real = 0; }
   ConstTpl(const ConstTpl &op2) {
