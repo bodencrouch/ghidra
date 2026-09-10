@@ -618,8 +618,20 @@ vector<OpTpl *> *PcodeCompile::assignBitRange(VarnodeTpl *vn,uint4 bitoffset,uin
   uint4 smallsize = (numbits+7)/8; // Size of input (output of rhs)
   bool shiftneeded = (bitoffset != 0);
   bool zextneeded = true;
-  uintb mask = (uintb)2;
-  mask = ~(((mask<<(numbits-1))-1) << bitoffset);
+  // A range can cross (or start beyond) the uintb word boundary.  Construct
+  // the preserve mask by cases so no shift reaches the word width.
+  const uint4 wordbits = 8 * sizeof(uintb);
+  uintb mask;
+  if (bitoffset >= wordbits) {
+    mask = ~((uintb)0);
+  }
+  else if (numbits >= wordbits - bitoffset) {
+    mask = (bitoffset == 0) ? 0 : (((uintb)1 << bitoffset) - 1);
+  }
+  else {
+    mask = (uintb)2;
+    mask = ~(((mask << (numbits - 1)) - 1) << bitoffset);
+  }
 
   if (vn->getSize().getType()==ConstTpl::real) {
     // If we know the size of the bitranged varnode, we can
