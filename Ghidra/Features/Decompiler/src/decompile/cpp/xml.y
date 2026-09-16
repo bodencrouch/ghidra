@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 %define api.prefix {xml}
+%define api.pure full
+%parse-param {XmlScan *scanner} {ContentHandler *handler} {int xmldebug}
+%lex-param {XmlScan *scanner}
 %{
 #include "xml.hh"
 // CharData mode   look for '<' '&' or "]]>"
@@ -109,13 +112,12 @@ struct NameValue {
   string *value;	///< The value
 };
 
-extern int xmllex(void);				///< Interface to the scanner
-extern int xmlerror(const char *str);			///< Interface for registering an error in parsing
-extern void print_content(const string &str);	///< Send character data to the ContentHandler
+union XMLSTYPE;
+extern int xmllex(XMLSTYPE *value,XmlScan *scanner);				///< Interface to the scanner
+extern int xmlerror(XmlScan *scanner,ContentHandler *handler,int dbg,const char *str);	///< Register a parsing error
+extern void print_content(ContentHandler *handler,const string &str);	///< Send character data to the ContentHandler
 extern int4 convertEntityRef(const string &ref);	///< Convert an XML entity to its equivalent character
 extern int4 convertCharRef(const string &ref);	///< Convert an XML character reference to its equivalent character
-static XmlScan *global_scan;					///< Global reference to the scanner
-static ContentHandler *handler;					///< Global reference to the content handler
 
 %}
 
@@ -147,20 +149,20 @@ whitespace: ' '
 S: whitespace
    | S whitespace ;
 
-attsinglemid: '\'' { $$ = new string; global_scan->setmode(XmlScan::AttValueSingleMode); }
-	      | attsinglemid ATTVALUE { $$ = $1; *$$ += *$2; delete $2; global_scan->setmode(XmlScan::AttValueSingleMode); }
-	      | attsinglemid Reference { $$ = $1; *$$ += $2; global_scan->setmode(XmlScan::AttValueSingleMode); };
-attdoublemid: '"' { $$ = new string; global_scan->setmode(XmlScan::AttValueDoubleMode); }
-	      | attdoublemid ATTVALUE { $$ = $1; *$$ += *$2; delete $2; global_scan->setmode(XmlScan::AttValueDoubleMode); }
-	      | attdoublemid Reference { $$ = $1; *$$ += $2; global_scan->setmode(XmlScan::AttValueDoubleMode); };
+attsinglemid: '\'' { $$ = new string; scanner->setmode(XmlScan::AttValueSingleMode); }
+	      | attsinglemid ATTVALUE { $$ = $1; *$$ += *$2; delete $2; scanner->setmode(XmlScan::AttValueSingleMode); }
+	      | attsinglemid Reference { $$ = $1; *$$ += $2; scanner->setmode(XmlScan::AttValueSingleMode); };
+attdoublemid: '"' { $$ = new string; scanner->setmode(XmlScan::AttValueDoubleMode); }
+	      | attdoublemid ATTVALUE { $$ = $1; *$$ += *$2; delete $2; scanner->setmode(XmlScan::AttValueDoubleMode); }
+	      | attdoublemid Reference { $$ = $1; *$$ += $2; scanner->setmode(XmlScan::AttValueDoubleMode); };
 AttValue: attsinglemid '\'' { $$ = $1; }
 	  | attdoublemid '"' { $$ = $1; };
-elemstart: ELEMBRACE { global_scan->setmode(XmlScan::NameMode); delete $1; };
-commentstart: COMMBRACE '!' '-' '-' { global_scan->setmode(XmlScan::CommentMode); delete $1; } ;
+elemstart: ELEMBRACE { scanner->setmode(XmlScan::NameMode); delete $1; };
+commentstart: COMMBRACE '!' '-' '-' { scanner->setmode(XmlScan::CommentMode); delete $1; } ;
 Comment: commentstart COMMENT '-' '-' '>' { delete $2; } ;
-PI: COMMBRACE '?' { delete $1; yyerror("Processing instructions are not supported"); YYERROR; };
+PI: COMMBRACE '?' { delete $1; yyerror(scanner,handler,xmldebug,"Processing instructions are not supported"); YYERROR; };
 CDSect: CDStart CDATA CDEnd { $$ = $2; } ;
-CDStart: COMMBRACE '!' '[' 'C' 'D' 'A' 'T' 'A' '[' { global_scan->setmode(XmlScan::CDataMode); delete $1; } ;
+CDStart: COMMBRACE '!' '[' 'C' 'D' 'A' 'T' 'A' '[' { scanner->setmode(XmlScan::CDataMode); delete $1; } ;
 CDEnd: ']' ']' '>' ;
 
 doctypepro: doctypedecl
@@ -171,7 +173,7 @@ prologpre: XMLDecl
 prolog: prologpre doctypepro
 	| prologpre ;
 
-doctypedecl: COMMBRACE '!' 'D' 'O' 'C' 'T' 'Y' 'P' 'E' { delete $1; yyerror("DTD's not supported"); YYERROR; };
+doctypedecl: COMMBRACE '!' 'D' 'O' 'C' 'T' 'Y' 'P' 'E' { delete $1; yyerror(scanner,handler,xmldebug,"DTD's not supported"); YYERROR; };
 Eq: '='
     | S '='
     | Eq S ;
@@ -195,26 +197,26 @@ STag: stagstart '>' { handler->startElement($1->getelemURI(),$1->getelemName(),$
 EmptyElemTag: stagstart '/' '>' { handler->startElement($1->getelemURI(),$1->getelemName(),$1->getelemName(),*$1); $$ = $1; }
 	      | stagstart S '/' '>' { handler->startElement($1->getelemURI(),$1->getelemName(),$1->getelemName(),*$1); $$ = $1; };
 
-stagstart: elemstart NAME { $$ = new Attributes($2); global_scan->setmode(XmlScan::SNameMode); }
-	   | stagstart SAttribute { $$ = $1; $$->add_attribute( $2->name, $2->value); delete $2; global_scan->setmode(XmlScan::SNameMode); };
+stagstart: elemstart NAME { $$ = new Attributes($2); scanner->setmode(XmlScan::SNameMode); }
+	   | stagstart SAttribute { $$ = $1; $$->add_attribute( $2->name, $2->value); delete $2; scanner->setmode(XmlScan::SNameMode); };
 SAttribute: SNAME Eq AttValue { $$ = new NameValue; $$->name = $1; $$->value = $3; };
-etagbrace: COMMBRACE '/' { global_scan->setmode(XmlScan::NameMode); delete $1; };
+etagbrace: COMMBRACE '/' { scanner->setmode(XmlScan::NameMode); delete $1; };
 ETag: etagbrace NAME '>' { $$ = $2; }
       | etagbrace NAME S '>' { $$ = $2; };
 
-content: { global_scan->setmode(XmlScan::CharDataMode); }
-	 | content CHARDATA { print_content( *$2 ); delete $2; global_scan->setmode(XmlScan::CharDataMode); }
-	 | content element { global_scan->setmode(XmlScan::CharDataMode); }
-	 | content Reference { string *tmp=new string(); *tmp += $2; print_content(*tmp); delete tmp; global_scan->setmode(XmlScan::CharDataMode); }
-	 | content CDSect { print_content( *$2 ); delete $2; global_scan->setmode(XmlScan::CharDataMode); }
-	 | content PI { global_scan->setmode(XmlScan::CharDataMode); }
-	 | content Comment { global_scan->setmode(XmlScan::CharDataMode); };
+content: { scanner->setmode(XmlScan::CharDataMode); }
+	 | content CHARDATA { print_content(handler, *$2 ); delete $2; scanner->setmode(XmlScan::CharDataMode); }
+	 | content element { scanner->setmode(XmlScan::CharDataMode); }
+	 | content Reference { string *tmp=new string(); *tmp += $2; print_content(handler,*tmp); delete tmp; scanner->setmode(XmlScan::CharDataMode); }
+	 | content CDSect { print_content(handler, *$2 ); delete $2; scanner->setmode(XmlScan::CharDataMode); }
+	 | content PI { scanner->setmode(XmlScan::CharDataMode); }
+	 | content Comment { scanner->setmode(XmlScan::CharDataMode); };
 
 Reference: EntityRef { $$ = convertEntityRef(*$1); delete $1; }
 	   | CharRef { $$ = convertCharRef(*$1); delete $1; };
 
-refstart: '&' { global_scan->setmode(XmlScan::NameMode); } ;
-charrefstart: refstart '#' { global_scan->setmode(XmlScan::CharRefMode); };
+refstart: '&' { scanner->setmode(XmlScan::NameMode); } ;
+charrefstart: refstart '#' { scanner->setmode(XmlScan::CharRefMode); };
 CharRef: charrefstart CHARREF ';' { $$ = $2; };
 EntityRef: refstart NAME ';' { $$ = $2; };
 %%
@@ -448,7 +450,7 @@ int4 XmlScan::nexttoken(void)
   return -1;
 }
 
-void print_content(const string &str)
+void print_content(ContentHandler *handler,const string &str)
 
 {
   uint4 i;
@@ -501,16 +503,16 @@ int4 convertCharRef(const string &ref)
   return val;
 }
 
-int xmllex(void)
+int xmllex(XMLSTYPE *value,XmlScan *scanner)
 
 {
-  int res = global_scan->nexttoken();
+  int res = scanner->nexttoken();
   if (res>255)
-    yylval.str = global_scan->lval();
+    value->str = scanner->lval();
   return res;
 }
 
-int xmlerror(const char *str)
+int xmlerror(XmlScan *scanner,ContentHandler *handler,int dbg,const char *str)
 
 {
   handler->setError(str);
@@ -520,16 +522,12 @@ int xmlerror(const char *str)
 int4 xml_parse(istream &i,ContentHandler *hand,int4 dbg)
 
 {
-#if YYDEBUG
-  yydebug = dbg;
-#endif
-  global_scan = new XmlScan(i);
-  handler = hand;
-  handler->startDocument();
-  int4 res = yyparse();
+  // The parse parameter shadows Bison's global trace flag, including in its helpers.
+  XmlScan scanner(i);
+  hand->startDocument();
+  int4 res = yyparse(&scanner,hand,dbg);
   if (res == 0)
-    handler->endDocument();
-  delete global_scan;
+    hand->endDocument();
   return res;
 }
 

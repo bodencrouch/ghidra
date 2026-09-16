@@ -256,6 +256,7 @@ public:
   void printDebug(const string &message) const { *debugstream << message << endl; }	///< Print message to the debug stream
 #endif
 protected:
+  bool initializationComplete; ///< True only after init() has completed successfully
   void addSpacebase(AddrSpace *basespace,const string &nm,const VarnodeData &ptrdata,
 		    int4 truncSize,bool isreversejustified,bool stackGrowth,bool isFormal);
 

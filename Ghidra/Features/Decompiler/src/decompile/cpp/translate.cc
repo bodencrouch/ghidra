@@ -444,6 +444,42 @@ void AddrSpaceManager::copySpaces(const AddrSpaceManager *op2)
   setDefaultDataSpace(op2->getDefaultDataSpace()->getIndex());
 }
 
+/// Save only mutable configuration: space identity, ownership, and reference counts remain live.
+AddrSpaceManager::SpaceConfiguration AddrSpaceManager::saveSpaceConfiguration(void) const
+
+{
+  SpaceConfiguration config;
+  config.nohighptr = nohighptr;
+  for(AddrSpace *space : baselist) {
+    if (space == (AddrSpace *)0) continue;
+    config.spaces.push_back({space,space->flags,space->shortcut,space->addressSize,space->wordsize,
+        space->highest,space->pointerLowerBound,space->pointerUpperBound,space->minimumPointerSize,
+        space->delay,space->deadcodedelay});
+  }
+  return config;
+}
+
+/// Restore the baseline before reusing a translator for a different program. In particular,
+/// resetting addressability flags alone is insufficient: addNoHighPtr() stores ranges here too.
+void AddrSpaceManager::restoreSpaceConfiguration(const SpaceConfiguration &config)
+
+{
+  nohighptr = config.nohighptr;
+  for(const SpaceConfiguration::Entry &entry : config.spaces) {
+    AddrSpace *space = entry.space;
+    space->flags = entry.flags;
+    space->shortcut = entry.shortcut;
+    space->addressSize = entry.addressSize;
+    space->wordsize = entry.wordsize;
+    space->highest = entry.highest;
+    space->pointerLowerBound = entry.pointerLowerBound;
+    space->pointerUpperBound = entry.pointerUpperBound;
+    space->minimumPointerSize = entry.minimumPointerSize;
+    space->delay = entry.delay;
+    space->deadcodedelay = entry.deadcodedelay;
+  }
+}
+
 /// Perform the \e privileged act of associating a base register with an existing \e virtual space
 /// \param basespace is the virtual space
 /// \param ptrdata is the location data for the base register

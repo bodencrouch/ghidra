@@ -165,6 +165,7 @@ class Sleigh : public SleighBase {
   ContextCache *cache;			///< Cache of recently used context values
   mutable DisassemblyCache *discache;	///< Cache of recently parsed instructions
   mutable PcodeCacher pcode_cache;	///< Cache of p-code data just prior to emitting
+  SpaceConfiguration languageSpaceConfig; ///< Language baseline, before any program-specific space configuration
   void clearForDelete(void);		///< Delete the context and disassembly caches
 protected:
   ParserContext *obtainContext(const Address &addr,ParserContext::parse_state state) const;

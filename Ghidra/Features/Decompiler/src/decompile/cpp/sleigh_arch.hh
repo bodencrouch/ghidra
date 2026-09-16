@@ -22,6 +22,7 @@
 #include "filemanage.hh"
 #include "architecture.hh"
 #include "sleigh.hh"
+#include <mutex>
 
 namespace ghidra {
 
@@ -105,14 +106,18 @@ public:
 ///
 /// Generally a \e language \e id (i.e. x86:LE:64:default) is provided, then this
 /// object is able to automatically load in configuration and construct the Translate object.
+/// Each live architecture has an exclusive translator. Initialization and destruction still
+/// require external serialization: language discovery and address-space teardown use shared state.
 class SleighArchitecture : public Architecture {
-  static map<int4,Sleigh> translators;		///< Map from language index to instantiated translators
+  static map<int4,unique_ptr<Sleigh> > translators; ///< At most one idle translator per language
+  static std::mutex translatorMutex;              ///< Protect checkout and return of idle translators only
+  unique_ptr<Sleigh> pendingTranslator;           ///< Translator reserved before specification loading
   static vector<LanguageDescription> description;	///< List of languages we know about
   int4 languageindex;					///< Index (within LanguageDescription array) of the active language
   string filename;					///< Name of active load-image file
   string target;					///< The \e language \e id of the active load-image
   static void loadLanguageDescription(const string &specfile,ostream &errs);
-  bool isTranslateReused(void);				///< Test if last Translate object can be reused
+  bool isTranslateReused(void);                   ///< Reserve an idle translator for this architecture
 protected:
   ostream *errorstream;					///< Error stream associated with \b this SleighArchitecture
   // buildLoader must be filled in by derived class

@@ -525,8 +525,10 @@ void Sleigh::clearForDelete(void)
 
 {
   delete cache;
+  cache = (ContextCache *)0;
   if (discache != (DisassemblyCache *)0)
     delete discache;
+  discache = (DisassemblyCache *)0;
 }
 
 Sleigh::~Sleigh(void)
@@ -539,6 +541,7 @@ Sleigh::~Sleigh(void)
 /// with a new LoadImage and ContextDatabase
 /// \param ld is the new LoadImage
 /// \param c_db is the new ContextDatabase
+/// Passing null for both pointers detaches an idle translator without allocating a cache.
 void Sleigh::reset(LoadImage *ld,ContextDatabase *c_db)
 
 {
@@ -546,8 +549,10 @@ void Sleigh::reset(LoadImage *ld,ContextDatabase *c_db)
   pcode_cache.clear();
   loader = ld;
   context_db = c_db;
-  cache = new ContextCache(c_db);
-  discache = (DisassemblyCache *)0;
+  if (c_db != (ContextDatabase *)0) {
+    restoreSpaceConfiguration(languageSpaceConfig);
+    cache = new ContextCache(c_db);
+  }
 }
 
 /// The .sla file from the document store is loaded and cache objects are prepared
@@ -566,6 +571,7 @@ void Sleigh::initialize(DocumentStorage &store)
     decoder.ingestStream(s);
     s.close();
     decode(decoder);
+    languageSpaceConfig = saveSpaceConfiguration();
   }
   else
     reregisterContext();

@@ -150,6 +150,7 @@ void ArchitectureCapability::sortCapabilities(void)
 Architecture::Architecture(void)
 
 {
+  initializationComplete = false;
   //  endian = -1;
   resetDefaultsInternal();
   min_funcsymbol_size = 1;
@@ -1392,6 +1393,7 @@ void Architecture::fillinReadOnlyFromLoader(void)
 void Architecture::init(DocumentStorage &store)
 
 {
+  initializationComplete = false;
   buildLoader(store);		// Loader is built first
   resolveArchitecture();
   buildSpecFile(store);
@@ -1412,6 +1414,7 @@ void Architecture::init(DocumentStorage &store)
 
   buildInstructions(store); // Must be called after translate is built
   fillinReadOnlyFromLoader();
+  initializationComplete = true;
 }
 
 void Architecture::resetDefaultsInternal(void)

@@ -235,6 +235,26 @@ class AddrSpaceManager {
   mutable set<JoinRecord *,JoinRecordCompare> splitset;	///< Different splits that have been defined in join space
   mutable vector<JoinRecord *> splitlist; ///< JoinRecords indexed by join address
 protected:
+  /// Configuration of existing language spaces, excluding identity and reference counts.
+  struct SpaceConfiguration {
+    struct Entry {
+      AddrSpace *space;
+      uint4 flags;
+      char shortcut;
+      uint4 addressSize;
+      uint4 wordsize;
+      uintb highest;
+      uintb pointerLowerBound;
+      uintb pointerUpperBound;
+      int4 minimumPointerSize;
+      int4 delay;
+      int4 deadcodedelay;
+    };
+    vector<Entry> spaces;
+    RangeList nohighptr;
+  };
+  SpaceConfiguration saveSpaceConfiguration(void) const; ///< Save language-space settings before program configuration
+  void restoreSpaceConfiguration(const SpaceConfiguration &config); ///< Restore settings without replacing shared spaces
   AddrSpace *decodeSpace(Decoder &decoder,const Translate *trans); ///< Add a space to the model based an on XML tag
   void decodeSpaces(Decoder &decoder,const Translate *trans); ///< Restore address spaces in the model from a stream
   void setDefaultCodeSpace(int4 index); ///< Set the default address space (for code)

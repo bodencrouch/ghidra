@@ -33,7 +33,8 @@ ElementId ELEM_DESCRIPTION = ElementId("description",233);
 ElementId ELEM_LANGUAGE = ElementId("language",234);
 ElementId ELEM_LANGUAGE_DEFINITIONS = ElementId("language_definitions",235);
 
-map<int4,Sleigh> SleighArchitecture::translators;
+map<int4,unique_ptr<Sleigh> > SleighArchitecture::translators;
+std::mutex SleighArchitecture::translatorMutex;
 vector<LanguageDescription> SleighArchitecture::description;
 
 FileManage SleighArchitecture::specpaths; // Global specfile manager
@@ -152,7 +153,18 @@ void SleighArchitecture::loadLanguageDescription(const string &specfile,ostream 
 SleighArchitecture::~SleighArchitecture(void)
 
 {
-  translate = (const Translate *)0;
+  // Failed initialization may have modified the translator's address spaces. Let the
+  // base destructor delete it instead of making it available to another architecture.
+  if (!initializationComplete || translate == (const Translate *)0)
+    return;
+  std::lock_guard<std::mutex> guard(translatorMutex);
+  map<int4,unique_ptr<Sleigh> >::iterator iter = translators.find(languageindex);
+  if (iter != translators.end() && !iter->second) {
+    Sleigh *idle = const_cast<Sleigh *>(static_cast<const Sleigh *>(translate));
+    idle->reset((LoadImage *)0,(ContextDatabase *)0);
+    iter->second.reset(idle);
+    translate = (const Translate *)0;
+  }
 }
 
 string SleighArchitecture::getDescription(void) const
@@ -161,29 +173,27 @@ string SleighArchitecture::getDescription(void) const
   return description[languageindex].getDescription();
 }
 
-/// If the current \b languageindex matches the \b last_languageindex,
-/// try to reuse the previous Sleigh object, so we don't reload
-/// the .sla file.
-/// \return \b true if it can be reused
+/// Reserve an idle Sleigh object, so we don't reload the .sla file. A live architecture
+/// never lends its translator to another architecture. Reserving here keeps specification
+/// loading and buildTranslator() consistent even if another checkout occurs between them.
+/// \return \b true if a translator was reserved
 bool SleighArchitecture::isTranslateReused(void)
 
 {
-  return (translators.find(languageindex) != translators.end());
+  std::lock_guard<std::mutex> guard(translatorMutex);
+  pendingTranslator = std::move(translators[languageindex]);
+  return pendingTranslator.get() != (Sleigh *)0;
 }
 
 Translate *SleighArchitecture::buildTranslator(DocumentStorage &store)
 
 {				// Build a sleigh translator
-  map<int4,Sleigh>::iterator iter;
-
-  iter = translators.find(languageindex);
-  if (iter != translators.end()) {
-    iter->second.reset(loader, context);
-    return &iter->second;
+  if (pendingTranslator) {
+    pendingTranslator->reset(loader,context);
+    return pendingTranslator.release();
   }
-  pair<map<int4,Sleigh>::iterator,bool> res;
-  res = translators.emplace(piecewise_construct,forward_as_tuple(languageindex),forward_as_tuple(loader,context));
-  return &(*res.first).second;
+  // Ownership passes to Architecture::restoreFromSpec(), including its exception guard.
+  return new Sleigh(loader,context);
 }
 
 PcodeInjectLibrary *SleighArchitecture::buildPcodeInjectLibrary(void)
