@@ -22,7 +22,6 @@
 #include "filemanage.hh"
 #include "architecture.hh"
 #include "sleigh.hh"
-#include <mutex>
 
 namespace ghidra {
 
@@ -109,8 +108,8 @@ public:
 /// Each live architecture has an exclusive translator. Initialization and destruction still
 /// require external serialization: language discovery and address-space teardown use shared state.
 class SleighArchitecture : public Architecture {
-  static map<int4,unique_ptr<Sleigh> > translators; ///< At most one idle translator per language
-  static std::mutex translatorMutex;              ///< Protect checkout and return of idle translators only
+  struct TranslatorCache;
+  std::shared_ptr<TranslatorCache> translatorCache; ///< Keep the idle cache alive through architecture teardown
   unique_ptr<Sleigh> pendingTranslator;           ///< Translator reserved before specification loading
   static vector<LanguageDescription> description;	///< List of languages we know about
   int4 languageindex;					///< Index (within LanguageDescription array) of the active language

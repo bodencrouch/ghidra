@@ -15,6 +15,7 @@
  */
 #include "sleigh_arch.hh"
 #include "inject_sleigh.hh"
+#include <mutex>
 
 namespace ghidra {
 
@@ -33,8 +34,10 @@ ElementId ELEM_DESCRIPTION = ElementId("description",233);
 ElementId ELEM_LANGUAGE = ElementId("language",234);
 ElementId ELEM_LANGUAGE_DEFINITIONS = ElementId("language_definitions",235);
 
-map<int4,unique_ptr<Sleigh> > SleighArchitecture::translators;
-std::mutex SleighArchitecture::translatorMutex;
+struct SleighArchitecture::TranslatorCache {
+  map<int4,unique_ptr<Sleigh> > translators; ///< At most one idle translator per language
+  std::mutex mutex;                       ///< Protect checkout and return only
+};
 vector<LanguageDescription> SleighArchitecture::description;
 
 FileManage SleighArchitecture::specpaths; // Global specfile manager
@@ -157,9 +160,9 @@ SleighArchitecture::~SleighArchitecture(void)
   // base destructor delete it instead of making it available to another architecture.
   if (!initializationComplete || translate == (const Translate *)0)
     return;
-  std::lock_guard<std::mutex> guard(translatorMutex);
-  map<int4,unique_ptr<Sleigh> >::iterator iter = translators.find(languageindex);
-  if (iter != translators.end() && !iter->second) {
+  std::lock_guard<std::mutex> guard(translatorCache->mutex);
+  map<int4,unique_ptr<Sleigh> >::iterator iter = translatorCache->translators.find(languageindex);
+  if (iter != translatorCache->translators.end() && !iter->second) {
     Sleigh *idle = const_cast<Sleigh *>(static_cast<const Sleigh *>(translate));
     idle->reset((LoadImage *)0,(ContextDatabase *)0);
     iter->second.reset(idle);
@@ -180,8 +183,8 @@ string SleighArchitecture::getDescription(void) const
 bool SleighArchitecture::isTranslateReused(void)
 
 {
-  std::lock_guard<std::mutex> guard(translatorMutex);
-  pendingTranslator = std::move(translators[languageindex]);
+  std::lock_guard<std::mutex> guard(translatorCache->mutex);
+  pendingTranslator = std::move(translatorCache->translators[languageindex]);
   return pendingTranslator.get() != (Sleigh *)0;
 }
 
@@ -449,6 +452,10 @@ SleighArchitecture::SleighArchitecture(const string &fname,const string &targ,os
   : Architecture()
 
 {
+  // Static architectures may outlive this shared handle during process shutdown.
+  // Each architecture retains the cache until its own translator has been returned.
+  static std::shared_ptr<TranslatorCache> cache = std::make_shared<TranslatorCache>();
+  translatorCache = cache;
   filename = fname;
   target = targ;
   errorstream = estream;
