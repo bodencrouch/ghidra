@@ -88,6 +88,7 @@ endforeach()
 # not register it merely because x86 is present.
 set(_reduced_build "${_root}/reduced-build")
 run("${CMAKE_COMMAND}" -S "${SOURCE_DIR}" -B "${_reduced_build}"
+  -DGHIDRA_DECOMP_LOCAL_ZLIB=ON
   -DGHIDRA_DECOMP_BUILD_TOOLS=OFF
   -DGHIDRA_DECOMP_BUILD_TESTS=ON
   -DGHIDRA_DECOMP_CHECK_MANIFEST=OFF
