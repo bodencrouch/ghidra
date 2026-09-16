@@ -46,7 +46,7 @@ function(ghidra_sleigh_compile_specs)
     BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
   if(NOT ARG_PROCESSORS_ROOT)
     get_filename_component(ARG_PROCESSORS_ROOT
-      "${CMAKE_CURRENT_LIST_DIR}/../../../../../Processors" ABSOLUTE)
+      "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../../../../../../Processors" ABSOLUTE)
   endif()
   if(NOT ARG_COMPILER)
     set(ARG_COMPILER sleigh_compiler)

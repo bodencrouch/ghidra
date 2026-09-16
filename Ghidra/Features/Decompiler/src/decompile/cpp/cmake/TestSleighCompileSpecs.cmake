@@ -1,16 +1,21 @@
-# Incremental output ownership regression; cmake -E copy stands in for SLEIGH.
+# Module-default and incremental ownership regression; cmake -E copy stands in
+# for SLEIGH.
 cmake_minimum_required(VERSION 3.20)
-if(NOT MODULE OR NOT TEST_ROOT)
-  message(FATAL_ERROR "MODULE and TEST_ROOT are required")
+if(NOT MODULE OR NOT SOURCE_DIR OR NOT TEST_ROOT)
+  message(FATAL_ERROR "MODULE, SOURCE_DIR and TEST_ROOT are required")
 endif()
 string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef _id)
 set(_root "${TEST_ROOT}/sleigh-specs-${_id}")
 set(_source "${_root}/source")
 set(_build "${_root}/build")
+set(_module_dir "${_root}/checkout/Ghidra/Features/Decompiler/src/decompile/cpp/cmake")
+set(_module "${_module_dir}/SleighCompileSpecs.cmake")
+set(_processors "${_root}/checkout/Ghidra/Processors")
 set(_home "${_build}/sleigh-home")
 set(_keep "Ghidra/Processors/Keep/data/languages")
 set(_drop "Ghidra/Processors/Drop/data/languages")
-file(MAKE_DIRECTORY "${_source}")
+file(MAKE_DIRECTORY "${_source}" "${_module_dir}")
+configure_file("${MODULE}" "${_module}" COPYONLY)
 file(WRITE "${_source}/CMakeLists.txt" [=[
 cmake_minimum_required(VERSION 3.20)
 project(SleighIncremental NONE)
@@ -19,19 +24,18 @@ if(NOT DEFINED PROCESSORS)
   set(PROCESSORS Keep Drop)
 endif()
 ghidra_sleigh_compile_specs(TARGET specs PROCESSORS ${PROCESSORS}
-  PROCESSORS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/processors"
   OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/sleigh-home" COMPILER "${CMAKE_COMMAND}")
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/sleigh-home/" DESTINATION specs)
 ]=])
 foreach(_proc Keep Drop)
-  set(_lang "${_source}/processors/${_proc}/data/languages")
+  set(_lang "${_processors}/${_proc}/data/languages")
   file(MAKE_DIRECTORY "${_lang}")
-  file(WRITE "${_source}/processors/${_proc}/build.gradle"
+  file(WRITE "${_processors}/${_proc}/build.gradle"
     "sleighCompileOptions = [ '-E', 'copy' ]\n")
   file(WRITE "${_lang}/keep.slaspec" "fake specification\n")
   file(WRITE "${_lang}/languages.ldefs" "<language slafile=\"keep.sla\"/>\n")
 endforeach()
-set(_lang "${_source}/processors/Keep/data/languages")
+set(_lang "${_processors}/Keep/data/languages")
 file(WRITE "${_lang}/retired.slaspec" "retired specification\n")
 file(APPEND "${_lang}/languages.ldefs" "<language slafile=\"retired.sla\"/>\n")
 file(WRITE "${_lang}/retired.pspec" "retired support\n")
@@ -44,7 +48,7 @@ function(run)
 endfunction()
 
 run("${CMAKE_COMMAND}" -S "${_source}" -B "${_build}"
-  "-DMODULE=${MODULE}")
+  "-DMODULE=${_module}")
 run("${CMAKE_COMMAND}" --build "${_build}")
 foreach(_file "${_keep}/keep.sla" "${_keep}/retired.sla" "${_keep}/retired.pspec" "${_drop}/keep.sla")
   if(NOT EXISTS "${_home}/${_file}")
@@ -79,4 +83,23 @@ foreach(_tree "${_home}" "${_root}/install/specs")
     endif()
   endforeach()
 endforeach()
-message(STATUS "SLEIGH incremental ownership and fresh install passed")
+
+# The unit suite names five processor languages. A reduced spec selection must
+# not register it merely because x86 is present.
+set(_reduced_build "${_root}/reduced-build")
+run("${CMAKE_COMMAND}" -S "${SOURCE_DIR}" -B "${_reduced_build}"
+  -DGHIDRA_DECOMP_LOCAL_ZLIB=ON
+  -DGHIDRA_DECOMP_BUILD_TOOLS=OFF
+  -DGHIDRA_DECOMP_BUILD_TESTS=ON
+  -DGHIDRA_DECOMP_CHECK_MANIFEST=OFF
+  -DGHIDRA_DECOMP_INSTALL=OFF
+  -DGHIDRA_DECOMP_SPEC_PROCESSORS=x86)
+execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_reduced_build}" -N
+  RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(NOT _rc EQUAL 0)
+  message(FATAL_ERROR "ctest -N: ${_rc}\n${_out}\n${_err}")
+endif()
+if(_out MATCHES "decomp_unittests")
+  message(FATAL_ERROR "Reduced processor selection registered decomp_unittests:\n${_out}")
+endif()
+message(STATUS "SLEIGH module default, incremental ownership, fresh install, and reduced selection passed")
