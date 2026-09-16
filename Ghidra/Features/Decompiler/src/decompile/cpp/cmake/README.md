@@ -107,9 +107,9 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | --- | --- | --- |
 | `manifest_matches_makefile` | manifest | The source manifest equals the `Makefile` sets. |
 | `manifest_rejects_archive_drift` | manifest | Mutating only a final Makefile archive composition is rejected. |
-| `sleigh_specs_incremental` | specs | Removed specifications and support files are retired without deleting unknown output files; a fresh install contains only retained outputs. |
+| `sleigh_specs_incremental` | specs | The module-relative processor default works from an external source directory; removed specifications and support files are retired without deleting unknown output files; a fresh install contains only retained outputs; reduced processor selections do not register the full unit suite. |
 | `manifest_matches_makefile_master` | manifest | Same against `GHIDRA_DECOMP_MASTER_MAKEFILE`, when set. |
-| `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). Registered when x86 is selected. |
+| `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). Registered when x86, Toy, PowerPC, MIPS and AARCH64 are selected. |
 | `decomp_datatests` | data | `decomp_test datatests` over the `../datatests` files whose language the compiled processors provide. On current master, the default processors cover 87 of 89. |
 | `sleigh_smoke_x86-64`, `sleigh_smoke_arm-thumb`, `sleigh_smoke_aarch64` | smoke | `sleigh_smoke` disassembles and translates fixed bytes with the built `.sla` files and compares with `cmake/smoke/expected/<case>.txt`. |
 | `capability_linkage` | smoke, isolation | `decomp_smoke --check-capabilities`: `xml`, `raw`, `c-language`, and `java-language` are registered; `bfd` is absent. |
@@ -119,9 +119,12 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | `installed_consumer` | install, smoke | Installs into the build directory, builds a separate `find_package` consumer using only installed headers/targets, and checks capability registration. Enabled for native top-level builds with installation enabled. |
 
 Run a subset with labels, for example `ctest --test-dir build -L smoke`.
-Each SLEIGH smoke test is registered only when its processor is selected;
-`no_jvm_runtime` requires x86. The installed-consumer test uses a fresh
-test-owned installation and build directory on every run.
+Each SLEIGH smoke test is registered only when its processor is selected.
+The `no_jvm_*`, `no_jvm_guard`, and `no_ghidra_process_symbols` checks are
+registered only for native Unix builds; they provide no Windows proof and are
+not run while cross-compiling. `no_jvm_runtime` also requires x86. The
+installed-consumer test uses a fresh test-owned installation and build
+directory on every run.
 
 `sleigh_smoke <sleigh-home> <case>` prints one block per instruction: the
 address, mnemonic and operands, then one indented line per p-code op with
@@ -200,16 +203,12 @@ already contains every object in `ghidra::sla`.
 
 ## Native lifetime and concurrency
 
-Each live `SleighArchitecture` owns its translator. Destroying a successfully
-initialized architecture retains at most one idle translator per language, so
-the next architecture can reuse the decoded specification without sharing a
-live loader or context. Reuse restores the language's address-space settings
-before applying the next program's configuration; failed initialization is
-not cached.
+`SleighArchitecture` stores translators in a static map keyed by language.
+Architectures for the same language therefore share one translator, and
+initializing another architecture resets that translator to the new loader and
+context. Destruction only clears the architecture's pointer; `shutdown()` does
+not clear the static map.
 
-Initialize the library once and serialize architecture construction and
-destruction. Exclusive translators and reentrant XML parsing do not make all
-native code thread-safe: language registries, address-space reference counts,
-and the p-code/C parsers still have shared state. The parallel regression
-covers two preinitialized, independent engines, not arbitrary simultaneous
-initialization or dynamic p-code injection.
+This build provides no proof that independent decompiler engines can run
+concurrently in one process, nor that XML or the other parsers are reentrant.
+Serialize native use or isolate engines in separate processes.

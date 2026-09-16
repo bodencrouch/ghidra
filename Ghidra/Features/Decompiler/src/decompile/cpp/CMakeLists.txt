@@ -307,6 +307,7 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
   add_test(NAME sleigh_specs_incremental
     COMMAND "${CMAKE_COMMAND}"
       "-DMODULE=${_cmake_dir}/SleighCompileSpecs.cmake"
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cmake-tests"
       -P "${_cmake_dir}/TestSleighCompileSpecs.cmake")
   set_tests_properties(sleigh_specs_incremental PROPERTIES LABELS "specs")
@@ -320,8 +321,16 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
     set_tests_properties(manifest_matches_makefile_master PROPERTIES LABELS "manifest")
   endif()
 
-  # Unit tests require x86; data tests are filtered independently below.
-  if(TARGET decomp_test AND "x86" IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
+  # Unit tests name languages from all of these processor modules; data tests
+  # are filtered independently below.
+  set(_unittest_processors x86 Toy PowerPC MIPS AARCH64)
+  set(_have_unittest_processors TRUE)
+  foreach(_processor IN LISTS _unittest_processors)
+    if(NOT _processor IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
+      set(_have_unittest_processors FALSE)
+    endif()
+  endforeach()
+  if(TARGET decomp_test AND _have_unittest_processors)
     add_test(NAME decomp_unittests
       COMMAND decomp_test -sleighpath "${GHIDRA_DECOMP_SLEIGH_HOME}" unittests
       WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
@@ -394,43 +403,46 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
   add_test(NAME capability_linkage COMMAND decomp_smoke --check-capabilities)
   set_tests_properties(capability_linkage PROPERTIES LABELS "smoke;isolation")
 
-  # Isolation: no JVM library, single execve when traced, no ghidra_process symbols.
-  set(_binary_files)
-  foreach(_t IN LISTS _test_binaries)
-    list(APPEND _binary_files "$<TARGET_FILE:${_t}>")
-  endforeach()
-  list(JOIN _binary_files "$<SEMICOLON>" _binary_files)
-  add_test(NAME no_jvm_linkage
-    COMMAND "${CMAKE_COMMAND}" -DMODE=linkage "-DBINARIES=${_binary_files}"
-            -P "${_cmake_dir}/NoJvmCheck.cmake")
-  set_tests_properties(no_jvm_linkage PROPERTIES LABELS "isolation")
-  add_test(NAME no_jvm_guard
-    COMMAND "${CMAKE_COMMAND}" "-DBINARY=$<TARGET_FILE:decomp_smoke>"
-            -P "${_cmake_dir}/TestNoJvmCheck.cmake")
-  set_tests_properties(no_jvm_guard PROPERTIES LABELS "isolation")
-
-  if("x86" IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
-    find_program(GHIDRA_DECOMP_STRACE strace)
-    set(_strace_arg)
-    if(GHIDRA_DECOMP_STRACE)
-      set(_strace_arg "-DSTRACE=${GHIDRA_DECOMP_STRACE}")
-    endif()
-    add_test(NAME no_jvm_runtime
-      COMMAND "${CMAKE_COMMAND}" -DMODE=runtime
-              "-DBINARY=$<TARGET_FILE:sleigh_smoke>"
-              "-DARGS=${GHIDRA_DECOMP_SLEIGH_HOME}$<SEMICOLON>x86-64$<SEMICOLON>--expect$<SEMICOLON>${_cmake_dir}/smoke/expected/x86-64.txt"
-              "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}"
-              ${_strace_arg}
+  # These isolation checks use Unix object/runtime tools and execute target
+  # binaries, so they are native-Unix tests only.
+  if(UNIX AND NOT CMAKE_CROSSCOMPILING)
+    set(_binary_files)
+    foreach(_t IN LISTS _test_binaries)
+      list(APPEND _binary_files "$<TARGET_FILE:${_t}>")
+    endforeach()
+    list(JOIN _binary_files "$<SEMICOLON>" _binary_files)
+    add_test(NAME no_jvm_linkage
+      COMMAND "${CMAKE_COMMAND}" -DMODE=linkage "-DBINARIES=${_binary_files}"
               -P "${_cmake_dir}/NoJvmCheck.cmake")
-    set_tests_properties(no_jvm_runtime PROPERTIES LABELS "isolation")
-  endif()
+    set_tests_properties(no_jvm_linkage PROPERTIES LABELS "isolation")
+    add_test(NAME no_jvm_guard
+      COMMAND "${CMAKE_COMMAND}" "-DBINARY=$<TARGET_FILE:decomp_smoke>"
+              -P "${_cmake_dir}/TestNoJvmCheck.cmake")
+    set_tests_properties(no_jvm_guard PROPERTIES LABELS "isolation")
 
-  add_test(NAME no_ghidra_process_symbols
-    COMMAND "${CMAKE_COMMAND}" -DMODE=symbols "-DNM=${CMAKE_NM}"
-            "-DARCHIVE=$<TARGET_FILE:decomp_archive>"
-            "-DPATTERN=GhidraCapability|GhidraCommand"
-            -P "${_cmake_dir}/NoJvmCheck.cmake")
-  set_tests_properties(no_ghidra_process_symbols PROPERTIES LABELS "isolation")
+    if("x86" IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
+      find_program(GHIDRA_DECOMP_STRACE strace)
+      set(_strace_arg)
+      if(GHIDRA_DECOMP_STRACE)
+        set(_strace_arg "-DSTRACE=${GHIDRA_DECOMP_STRACE}")
+      endif()
+      add_test(NAME no_jvm_runtime
+        COMMAND "${CMAKE_COMMAND}" -DMODE=runtime
+                "-DBINARY=$<TARGET_FILE:sleigh_smoke>"
+                "-DARGS=${GHIDRA_DECOMP_SLEIGH_HOME}$<SEMICOLON>x86-64$<SEMICOLON>--expect$<SEMICOLON>${_cmake_dir}/smoke/expected/x86-64.txt"
+                "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}"
+                ${_strace_arg}
+                -P "${_cmake_dir}/NoJvmCheck.cmake")
+      set_tests_properties(no_jvm_runtime PROPERTIES LABELS "isolation")
+    endif()
+
+    add_test(NAME no_ghidra_process_symbols
+      COMMAND "${CMAKE_COMMAND}" -DMODE=symbols "-DNM=${CMAKE_NM}"
+              "-DARCHIVE=$<TARGET_FILE:decomp_archive>"
+              "-DPATTERN=GhidraCapability|GhidraCommand"
+              -P "${_cmake_dir}/NoJvmCheck.cmake")
+    set_tests_properties(no_ghidra_process_symbols PROPERTIES LABELS "isolation")
+  endif()
 endif()
 
 # ---------------------------------------------------------------------------
