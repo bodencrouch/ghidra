@@ -10,8 +10,7 @@ The CMake build produces:
 - `libsla.a`: SLEIGH only (disassembly, p-code translation, emulation).
   Same members as `LIBSLA_NAMES` in the `Makefile`.
 - `libdecomp_archive.a`: the decompiler with SLEIGH. Same members as
-  `LIBDECOMP_NAMES` in the `Makefile`, without the libbfd loader unless
-  `GHIDRA_DECOMP_BFD` is on.
+  `LIBDECOMP_NAMES` in the `Makefile`, except for the libbfd loader.
 - `ghidra::decomp`: an interface target that links `libdecomp_archive.a`
   whole. The architecture and language capabilities (`xml`, `raw`,
   `c-language`, `java-language`) register themselves from static
@@ -63,7 +62,6 @@ podman run --rm -v "$PWD":/src:Z -w /src registry.fedoraproject.org/fedora:44 \
 | Option | Default | Effect |
 | --- | --- | --- |
 | `GHIDRA_DECOMP_LOCAL_ZLIB` | `OFF` | Compile `../zlib` with `NO_GZIP` and define `LOCAL_ZLIB` instead of linking the system zlib. |
-| `GHIDRA_DECOMP_BFD` | `OFF` | Compile `bfd_arch.cc` and `loadimage_bfd.cc` and link libbfd. Needs binutils development files. |
 | `GHIDRA_DECOMP_CONSOLE` | `ON` | Compile the console sources (`interface`, `ifacedecomp`, `ifaceterm`, ...). Needed by `decomp_console` and `decomp_test`. |
 | `GHIDRA_DECOMP_TERMINAL` | `ON` on Unix with console | Define `__TERMINAL__` (line editing for the console). Exported: it changes the layout of `IfaceTerm`. |
 | `GHIDRA_DECOMP_CPUI_DEBUG` | `OFF` | Define `CPUI_DEBUG`. Exported: it changes class layouts. |
@@ -110,7 +108,7 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). |
 | `decomp_datatests` | data | `decomp_test datatests` over the `../datatests` files whose language the compiled processors provide. On current master, the default processors cover 87 of 89. |
 | `sleigh_smoke_x86-64`, `sleigh_smoke_arm-thumb`, `sleigh_smoke_aarch64` | smoke | `sleigh_smoke` disassembles and translates fixed bytes with the built `.sla` files and compares with `cmake/smoke/expected/<case>.txt`. |
-| `capability_linkage` | smoke, isolation | `decomp_smoke --check-capabilities`: `xml`, `raw`, `c-language`, `java-language` are registered; `bfd` only with `GHIDRA_DECOMP_BFD`. |
+| `capability_linkage` | smoke, isolation | `decomp_smoke --check-capabilities`: `xml`, `raw`, `c-language`, and `java-language` are registered; `bfd` is absent. |
 | `no_jvm_linkage` | isolation | No built program links `libjvm`, `libjava`, `libjli` or `libjawt` (`ldd`, `otool -L` or `readelf -d`). |
 | `no_jvm_runtime` | isolation | `sleigh_smoke` runs under `env -i PATH=/usr/bin HOME=/nonexistent LANG=C`. With `strace` present, exactly one `execve` is recorded: no child process. |
 | `no_ghidra_process_symbols` | isolation | `nm` finds no `GhidraCapability` or `GhidraCommand` symbol in `libdecomp_archive.a`. |
@@ -176,7 +174,7 @@ int main() {
 
 The config file exports `GhidraDecompiler_GHIDRA_VERSION`,
 `GhidraDecompiler_SLA_FORMAT_VERSION`, `GhidraDecompiler_SLEIGH_HOME`, and
-`GhidraDecompiler_HAVE_BFD`, `_HAVE_CONSOLE`, `_HAVE_TERMINAL`,
+`GhidraDecompiler_HAVE_CONSOLE`, `_HAVE_TERMINAL`,
 `_HAVE_CPUI_DEBUG`, `_HAVE_LOCAL_ZLIB`. The compile definitions that change
 class layouts (`__TERMINAL__`, `CPUI_DEBUG`, `LOCAL_ZLIB`) travel with the
 targets, so a consumer sees the same layouts the archives were built with.

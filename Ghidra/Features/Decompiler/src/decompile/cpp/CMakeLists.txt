@@ -38,7 +38,6 @@ include(CMakePackageConfigHelpers)
 # ---------------------------------------------------------------------------
 # Options.  Defaults follow the Gradle build where one exists.
 option(GHIDRA_DECOMP_LOCAL_ZLIB "Compile the bundled ../zlib instead of linking the system zlib" OFF)
-option(GHIDRA_DECOMP_BFD "Build the libbfd loader (bfd_arch, loadimage_bfd); needs binutils headers" OFF)
 option(GHIDRA_DECOMP_CONSOLE "Build the console command interface (needed by decomp_console and decomp_test)" ON)
 cmake_dependent_option(GHIDRA_DECOMP_TERMINAL "Terminal line editing for the console (defines __TERMINAL__)" ON
   "GHIDRA_DECOMP_CONSOLE;UNIX" OFF)
@@ -178,22 +177,7 @@ set(_extra_sources ${GHIDRA_DECOMP_EXTRA_BASE_SOURCES})
 if(GHIDRA_DECOMP_CONSOLE)
   list(APPEND _extra_sources ${GHIDRA_DECOMP_EXTRA_CONSOLE_SOURCES})
 endif()
-if(GHIDRA_DECOMP_BFD)
-  list(APPEND _extra_sources ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES})
-  if(GHIDRA_DECOMP_CONSOLE)
-    list(APPEND _extra_sources ${GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES})
-  endif()
-endif()
 _ghidra_decomp_object_library(ghidra_extra_objs ${_extra_sources})
-
-if(GHIDRA_DECOMP_BFD)
-  find_path(GHIDRA_DECOMP_BFD_INCLUDE_DIR bfd.h)
-  find_library(GHIDRA_DECOMP_BFD_LIBRARY bfd)
-  if(NOT GHIDRA_DECOMP_BFD_INCLUDE_DIR OR NOT GHIDRA_DECOMP_BFD_LIBRARY)
-    message(FATAL_ERROR "GHIDRA_DECOMP_BFD=ON but bfd.h or libbfd was not found")
-  endif()
-  target_include_directories(ghidra_extra_objs PRIVATE "${GHIDRA_DECOMP_BFD_INCLUDE_DIR}")
-endif()
 
 # ---------------------------------------------------------------------------
 # sla: Makefile LIBSLA_NAMES = CORE + SLEIGH + loadimage sleigh memstate
@@ -208,7 +192,7 @@ target_link_libraries(sla PUBLIC ${_zlib_link})
 add_library(ghidra::sla ALIAS sla)
 
 # decomp_archive: Makefile LIBDECOMP_NAMES = CORE + DECCORE + EXTRA + SLEIGH,
-# without bfd_arch/loadimage_bfd unless GHIDRA_DECOMP_BFD.
+# without bfd_arch/loadimage_bfd.
 add_library(decomp_archive STATIC
   $<TARGET_OBJECTS:ghidra_core_objs>
   $<TARGET_OBJECTS:ghidra_sleigh_objs>
@@ -218,10 +202,6 @@ add_library(decomp_archive STATIC
   ${_zlib_objects})
 _ghidra_decomp_archive_interface(decomp_archive)
 target_link_libraries(decomp_archive PUBLIC ${_zlib_link})
-if(GHIDRA_DECOMP_BFD)
-  target_include_directories(decomp_archive INTERFACE "${GHIDRA_DECOMP_BFD_INCLUDE_DIR}")
-  target_link_libraries(decomp_archive PUBLIC "${GHIDRA_DECOMP_BFD_LIBRARY}")
-endif()
 add_library(ghidra::decomp_archive ALIAS decomp_archive)
 
 # decomp: the archive linked whole.  The capability singletons (xml, raw,
@@ -293,8 +273,6 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
   add_executable(decomp_smoke "${_cmake_dir}/smoke/decomp_smoke.cc")
   _ghidra_decomp_compile_settings(decomp_smoke)
   target_link_libraries(decomp_smoke PRIVATE decomp)
-  target_compile_definitions(decomp_smoke PRIVATE
-    GHIDRA_DECOMP_SMOKE_EXPECT_BFD=$<BOOL:${GHIDRA_DECOMP_BFD}>)
   list(APPEND _test_binaries decomp_smoke)
 
   if(TARGET sleigh_compiler)

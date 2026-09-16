@@ -19,8 +19,7 @@
 //       Initialize the library the way startDecompilerLibrary does and check
 //       that the capability singletons registered from static initializers
 //       are present: architectures "xml" and "raw", languages "c-language"
-//       and "java-language".  "bfd" must be present exactly when the build
-//       compiled the libbfd loader (GHIDRA_DECOMP_SMOKE_EXPECT_BFD).
+//       and "java-language".  "bfd" must be absent.
 //       A plain static archive drops these objects; this test proves the
 //       whole-archive link of ghidra::decomp.
 //
@@ -32,10 +31,6 @@
 
 #include <cstring>
 #include <iostream>
-
-#ifndef GHIDRA_DECOMP_SMOKE_EXPECT_BFD
-#define GHIDRA_DECOMP_SMOKE_EXPECT_BFD 0
-#endif
 
 namespace {
 
@@ -67,10 +62,8 @@ int checkCapabilities(void)
       failures += 1;
   }
   bool bfd = ArchitectureCapability::getCapability("bfd") != (ArchitectureCapability *)0;
-  bool expectBfd = GHIDRA_DECOMP_SMOKE_EXPECT_BFD != 0;
-  cout << "architecture bfd: " << (bfd ? "present" : "absent")
-       << " (expected " << (expectBfd ? "present" : "absent") << ")" << endl;
-  if (bfd != expectBfd)
+  cout << "architecture bfd: " << (bfd ? "UNEXPECTED" : "absent") << endl;
+  if (bfd)
     failures += 1;
 
   PrintLanguageCapability *def = PrintLanguageCapability::getDefault();
