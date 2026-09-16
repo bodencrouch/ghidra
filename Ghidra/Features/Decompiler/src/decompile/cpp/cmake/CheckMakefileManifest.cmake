@@ -10,7 +10,8 @@
 # references), computes EXTRA the way the Makefile does (every *.cc in
 # SOURCE_DIR that is in none of the other sets), and compares each set with
 # the lists in GhidraDecompSources.cmake.  Exits with an error and prints
-# the only-in-Makefile and only-in-CMake names when they differ.
+# the only-in-Makefile and only-in-CMake names when they differ.  The final
+# LIBSLA_NAMES and LIBDECOMP_NAMES compositions are checked as well.
 #
 # Also usable as an include from CMakeLists.txt: call
 # ghidra_decomp_check_manifest(<makefile> <source dir>) after including
@@ -27,6 +28,25 @@ function(_ghidra_decomp_parse_makefile_var makefile_text var out_var)
   string(REGEX REPLACE "\\$\\([^)]*\\)" "" _value "${_value}")
   string(REGEX REPLACE "[ \t]+" ";" _list "${_value}")
   list(REMOVE_ITEM _list "")
+  set(${out_var} "${_list}" PARENT_SCOPE)
+endfunction()
+
+function(_ghidra_decomp_expand_archive makefile_text var out_var)
+  string(REGEX MATCH "(^|\n)${var}[ \t]*=[ \t]*([^\n]*)" _m "${makefile_text}")
+  if(NOT _m)
+    message(FATAL_ERROR "manifest check: variable ${var} not found in Makefile")
+  endif()
+  set(_value "${CMAKE_MATCH_2}")
+  foreach(_group CORE DECCORE SLEIGH GHIDRA SLACOMP SPECIAL EXTRA)
+    string(REPLACE "$(${_group})" "${_MK_${_group}}" _value "${_value}")
+  endforeach()
+  if(_value MATCHES "\\$\\(")
+    message(FATAL_ERROR "manifest check: unsupported reference in ${var}: ${_value}")
+  endif()
+  string(REGEX REPLACE "[ \t]+" ";" _list "${_value}")
+  list(REMOVE_ITEM _list "")
+  # Makefile LIBSLA_NAMES names sleigh both directly and through SLEIGH.
+  list(REMOVE_DUPLICATES _list)
   set(${out_var} "${_list}" PARENT_SCOPE)
 endfunction()
 
@@ -125,6 +145,20 @@ function(ghidra_decomp_check_manifest makefile source_dir)
   if(NOT _ok)
     set(_all_ok FALSE)
   endif()
+
+  foreach(_library LIBSLA LIBDECOMP)
+    _ghidra_decomp_expand_archive("${_text}" ${_library}_NAMES _members)
+    if(_library STREQUAL "LIBDECOMP")
+      # The standalone build deliberately omits the optional BFD loader.
+      list(REMOVE_ITEM _members ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES}
+        ${GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES})
+    endif()
+    _ghidra_decomp_compare_set(${_library}_NAMES "${_members}"
+      "${GHIDRA_DECOMP_${_library}_SOURCES}" _ok)
+    if(NOT _ok)
+      set(_all_ok FALSE)
+    endif()
+  endforeach()
 
   # Every listed source must exist.
   foreach(_n IN LISTS GHIDRA_DECOMP_CORE_SOURCES GHIDRA_DECOMP_DECCORE_ALL_SOURCES

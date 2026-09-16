@@ -1,5 +1,6 @@
 # Exercise only installed usage requirements in a separate CMake project.
 set(root "@CMAKE_CURRENT_BINARY_DIR@/installed-consumer")
+file(REMOVE_RECURSE "${root}")
 set(prefix "${root}/prefix")
 execute_process(
   COMMAND "@CMAKE_COMMAND@" --install "@CMAKE_CURRENT_BINARY_DIR@"

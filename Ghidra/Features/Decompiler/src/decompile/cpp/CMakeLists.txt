@@ -34,6 +34,7 @@ project(GhidraDecompiler VERSION ${GHIDRA_DECOMP_GHIDRA_VERSION} LANGUAGES CXX)
 include(CMakeDependentOption)
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Options.  Defaults follow the Gradle build where one exists.
@@ -121,6 +122,7 @@ set(GHIDRA_DECOMP_INSTALL_ZLIB_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/ghidra/zl
 set(GHIDRA_DECOMP_INSTALL_SLEIGH_HOME "${CMAKE_INSTALL_DATADIR}/ghidra-decompiler/sleigh-home")
 
 function(_ghidra_decomp_compile_settings target)
+  target_link_libraries(${target} PRIVATE Threads::Threads)
   set_target_properties(${target} PROPERTIES
     CXX_STANDARD ${GHIDRA_DECOMP_CXX_STANDARD}
     CXX_STANDARD_REQUIRED ON
@@ -134,6 +136,10 @@ endfunction()
 
 # Usage requirements of the archives.
 function(_ghidra_decomp_archive_interface target)
+  target_link_libraries(${target} INTERFACE Threads::Threads)
+  if(GHIDRA_DECOMP_SANITIZE)
+    target_link_options(${target} INTERFACE -fsanitize=${GHIDRA_DECOMP_SANITIZE})
+  endif()
   target_compile_definitions(${target} INTERFACE ${GHIDRA_DECOMP_PUBLIC_DEFINITIONS})
   target_compile_features(${target} INTERFACE cxx_std_${GHIDRA_DECOMP_CXX_STANDARD})
   target_include_directories(${target} INTERFACE
@@ -148,6 +154,9 @@ function(_ghidra_decomp_object_library name)
   endforeach()
   add_library(${name} OBJECT ${_srcs})
   _ghidra_decomp_compile_settings(${name})
+  if(NOT GHIDRA_DECOMP_LOCAL_ZLIB)
+    target_link_libraries(${name} PRIVATE ZLIB::ZLIB)
+  endif()
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -289,6 +298,18 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
       -P "${_cmake_dir}/CheckMakefileManifest.cmake")
   set_tests_properties(manifest_matches_makefile PROPERTIES LABELS "manifest")
+  add_test(NAME manifest_rejects_archive_drift
+    COMMAND "${CMAKE_COMMAND}"
+      -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+      -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/manifest-regression
+      -P "${_cmake_dir}/TestMakefileManifest.cmake")
+  set_tests_properties(manifest_rejects_archive_drift PROPERTIES LABELS "manifest")
+  add_test(NAME sleigh_specs_incremental
+    COMMAND "${CMAKE_COMMAND}"
+      "-DMODULE=${_cmake_dir}/SleighCompileSpecs.cmake"
+      "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cmake-tests"
+      -P "${_cmake_dir}/TestSleighCompileSpecs.cmake")
+  set_tests_properties(sleigh_specs_incremental PROPERTIES LABELS "specs")
   if(GHIDRA_DECOMP_MASTER_MAKEFILE)
     get_filename_component(_master_dir "${GHIDRA_DECOMP_MASTER_MAKEFILE}" DIRECTORY)
     add_test(NAME manifest_matches_makefile_master
@@ -299,13 +320,15 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
     set_tests_properties(manifest_matches_makefile_master PROPERTIES LABELS "manifest")
   endif()
 
-  # Unit tests and data tests.  Both need the x86 specification.
-  if(TARGET decomp_test AND _have_specs)
+  # Unit tests require x86; data tests are filtered independently below.
+  if(TARGET decomp_test AND "x86" IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
     add_test(NAME decomp_unittests
       COMMAND decomp_test -sleighpath "${GHIDRA_DECOMP_SLEIGH_HOME}" unittests
       WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
     set_tests_properties(decomp_unittests PROPERTIES LABELS "unit")
+  endif()
 
+  if(TARGET decomp_test AND _have_specs)
     # Select the data tests whose language is produced by the compiled
     # processors.  Language ids come from the .ldefs files.
     set(_langids)
@@ -351,6 +374,16 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
   # SLEIGH smoke tests: fixed byte strings, expected output committed.
   if(_have_specs)
     foreach(_case x86-64 arm-thumb aarch64)
+      if(_case STREQUAL "x86-64")
+        set(_processor x86)
+      elseif(_case STREQUAL "arm-thumb")
+        set(_processor ARM)
+      else()
+        set(_processor AARCH64)
+      endif()
+      if(NOT _processor IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
+        continue()
+      endif()
       add_test(NAME sleigh_smoke_${_case}
         COMMAND sleigh_smoke "${GHIDRA_DECOMP_SLEIGH_HOME}" ${_case}
                 --expect "${_cmake_dir}/smoke/expected/${_case}.txt")
@@ -361,7 +394,7 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
   add_test(NAME capability_linkage COMMAND decomp_smoke --check-capabilities)
   set_tests_properties(capability_linkage PROPERTIES LABELS "smoke;isolation")
 
-  # Isolation: no JVM library, no child process, no ghidra_process symbols.
+  # Isolation: no JVM library, single execve when traced, no ghidra_process symbols.
   set(_binary_files)
   foreach(_t IN LISTS _test_binaries)
     list(APPEND _binary_files "$<TARGET_FILE:${_t}>")
@@ -371,8 +404,12 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
     COMMAND "${CMAKE_COMMAND}" -DMODE=linkage "-DBINARIES=${_binary_files}"
             -P "${_cmake_dir}/NoJvmCheck.cmake")
   set_tests_properties(no_jvm_linkage PROPERTIES LABELS "isolation")
+  add_test(NAME no_jvm_guard
+    COMMAND "${CMAKE_COMMAND}" "-DBINARY=$<TARGET_FILE:decomp_smoke>"
+            -P "${_cmake_dir}/TestNoJvmCheck.cmake")
+  set_tests_properties(no_jvm_guard PROPERTIES LABELS "isolation")
 
-  if(_have_specs)
+  if("x86" IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
     find_program(GHIDRA_DECOMP_STRACE strace)
     set(_strace_arg)
     if(GHIDRA_DECOMP_STRACE)

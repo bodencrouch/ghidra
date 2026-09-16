@@ -8,8 +8,8 @@
 #         [-DWORKDIR=<dir>] -P NoJvmCheck.cmake
 #       Run the binary with an empty environment (env -i PATH=/usr/bin
 #       HOME=/nonexistent LANG=C).  With STRACE set, also record execve
-#       calls and require exactly one: the program never starts another
-#       process.
+#       calls and require exactly one. This does not detect fork-only children
+#       or execveat calls.
 #
 #   cmake -DMODE=symbols -DNM=<nm> -DARCHIVE=<lib.a> -DPATTERN=<regex>
 #         -P NoJvmCheck.cmake
@@ -38,18 +38,22 @@ if(MODE STREQUAL "linkage")
     endif()
     if(_ldd)
       execute_process(COMMAND "${_ldd}" "${_bin}" OUTPUT_VARIABLE _out ERROR_VARIABLE _err RESULT_VARIABLE _rc)
-      # ldd fails on static executables; that is a pass.
+      # ldd also fails on static executables. Accept them only after readelf
+      # successfully inspects their ELF dynamic section (which may be absent).
       if(NOT _rc EQUAL 0 AND _readelf)
-        execute_process(COMMAND "${_readelf}" -d "${_bin}" OUTPUT_VARIABLE _out ERROR_QUIET)
+        execute_process(COMMAND "${_readelf}" -d "${_bin}" OUTPUT_VARIABLE _out ERROR_VARIABLE _err RESULT_VARIABLE _rc)
       endif()
     elseif(_otool)
-      execute_process(COMMAND "${_otool}" -L "${_bin}" OUTPUT_VARIABLE _out ERROR_QUIET)
+      execute_process(COMMAND "${_otool}" -L "${_bin}" OUTPUT_VARIABLE _out ERROR_VARIABLE _err RESULT_VARIABLE _rc)
     elseif(_readelf)
-      execute_process(COMMAND "${_readelf}" -d "${_bin}" OUTPUT_VARIABLE _out ERROR_QUIET)
+      execute_process(COMMAND "${_readelf}" -d "${_bin}" OUTPUT_VARIABLE _out ERROR_VARIABLE _err RESULT_VARIABLE _rc)
     else()
       message(FATAL_ERROR "NoJvmCheck: no ldd, otool or readelf found")
     endif()
-    if(_out MATCHES "${_jvm_regex}")
+    if(NOT _rc EQUAL 0)
+      message(SEND_ERROR "NoJvmCheck: cannot inspect ${_bin} (rc=${_rc}):\n${_out}\n${_err}")
+      set(_failed TRUE)
+    elseif(_out MATCHES "${_jvm_regex}")
       message(SEND_ERROR "NoJvmCheck: ${_bin} links a JVM library:\n${_out}")
       set(_failed TRUE)
     else()
@@ -104,7 +108,7 @@ elseif(MODE STREQUAL "runtime")
     if(NOT _n EQUAL 1)
       message(FATAL_ERROR "NoJvmCheck: expected exactly one execve, saw ${_n}:\n${_lines}")
     endif()
-    message(STATUS "NoJvmCheck: one execve, no child process")
+    message(STATUS "NoJvmCheck: exactly one execve recorded")
   endif()
   message(STATUS "NoJvmCheck: ${BINARY} ran with an empty environment")
 

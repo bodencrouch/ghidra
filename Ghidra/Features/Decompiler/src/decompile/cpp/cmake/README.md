@@ -90,7 +90,9 @@ When this directory is added to another project with `add_subdirectory`,
 `Makefile` uses (`CORE`, `DECCORE`, `SLEIGH`, `GHIDRA`, `SLACOMP`,
 `SPECIAL`, and `EXTRA` as every other `*.cc`).
 `cmake/CheckMakefileManifest.cmake` parses the `Makefile` and compares the
-sets. It runs at configure time and as the test `manifest_matches_makefile`.
+sets and the expanded `LIBSLA_NAMES`/`LIBDECOMP_NAMES` archive membership
+(excluding BFD support). It runs at configure time and as the test
+`manifest_matches_makefile`.
 When a source is added or removed upstream, the check names it under
 `only-in-Makefile` or `only-in-CMake`, and the fix is a one-line edit of the
 manifest. The check can also run by hand:
@@ -104,24 +106,31 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | Test | Label | What it checks |
 | --- | --- | --- |
 | `manifest_matches_makefile` | manifest | The source manifest equals the `Makefile` sets. |
+| `manifest_rejects_archive_drift` | manifest | Mutating only a final Makefile archive composition is rejected. |
+| `sleigh_specs_incremental` | specs | Removed specifications and support files are retired without deleting unknown output files; a fresh install contains only retained outputs. |
 | `manifest_matches_makefile_master` | manifest | Same against `GHIDRA_DECOMP_MASTER_MAKEFILE`, when set. |
-| `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). |
+| `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). Registered when x86 is selected. |
 | `decomp_datatests` | data | `decomp_test datatests` over the `../datatests` files whose language the compiled processors provide. On current master, the default processors cover 87 of 89. |
 | `sleigh_smoke_x86-64`, `sleigh_smoke_arm-thumb`, `sleigh_smoke_aarch64` | smoke | `sleigh_smoke` disassembles and translates fixed bytes with the built `.sla` files and compares with `cmake/smoke/expected/<case>.txt`. |
 | `capability_linkage` | smoke, isolation | `decomp_smoke --check-capabilities`: `xml`, `raw`, `c-language`, and `java-language` are registered; `bfd` is absent. |
 | `no_jvm_linkage` | isolation | No built program links `libjvm`, `libjava`, `libjli` or `libjawt` (`ldd`, `otool -L` or `readelf -d`). |
-| `no_jvm_runtime` | isolation | `sleigh_smoke` runs under `env -i PATH=/usr/bin HOME=/nonexistent LANG=C`. With `strace` present, exactly one `execve` is recorded: no child process. |
+| `no_jvm_runtime` | isolation | `sleigh_smoke` runs under `env -i PATH=/usr/bin HOME=/nonexistent LANG=C`. With `strace` present, exactly one `execve` is recorded. This does not detect fork-only children or `execveat`. |
 | `no_ghidra_process_symbols` | isolation | `nm` finds no `GhidraCapability` or `GhidraCommand` symbol in `libdecomp_archive.a`. |
 | `installed_consumer` | install, smoke | Installs into the build directory, builds a separate `find_package` consumer using only installed headers/targets, and checks capability registration. Enabled for native top-level builds with installation enabled. |
 
 Run a subset with labels, for example `ctest --test-dir build -L smoke`.
+Each SLEIGH smoke test is registered only when its processor is selected;
+`no_jvm_runtime` requires x86. The installed-consumer test uses a fresh
+test-owned installation and build directory on every run.
 
 `sleigh_smoke <sleigh-home> <case>` prints one block per instruction: the
 address, mnemonic and operands, then one indented line per p-code op with
 varnodes as `space[offset:size]`. The expected files were generated once
-and reviewed by hand. During comparison, unique-space offsets are named by
-first occurrence because they are internal temporary identifiers; their reuse
-and the rest of each p-code operation remain exact. Regenerate one with
+and reviewed by hand. Comparison retains raw unique-space offsets and sizes,
+including every alias and partial overlap. Specification changes can change
+temporary allocation, so review the resulting p-code before updating a golden.
+Only LOAD/STORE address-space host pointers are rendered as stable space names.
+Regenerate one with
 `build/sleigh_smoke build/sleigh-home x86-64 > cmake/smoke/expected/x86-64.txt`
 after a deliberate change to a spec.
 
@@ -140,6 +149,10 @@ compiled. Per-processor compiler options come from `sleighCompileOptions` in
 `Ghidra/Processors/<P>/build.gradle`, the same source the Gradle build
 reads. Each spec compiles in single-file mode with an explicit output path,
 so `@include` resolves against the source tree and no file is written there.
+
+The build records its generated/copied paths in a build-directory manifest.
+Reconfiguration removes obsolete paths from that list, including files for
+removed processors, but preserves unrecorded files in the output tree.
 
 `decomp_test` and the console take this directory with `-sleighpath` or
 through `SLEIGHHOME` with `-usesleighenv`.
@@ -179,6 +192,24 @@ The config file exports `GhidraDecompiler_GHIDRA_VERSION`,
 `_HAVE_CPUI_DEBUG`, `_HAVE_LOCAL_ZLIB`. The compile definitions that change
 class layouts (`__TERMINAL__`, `CPUI_DEBUG`, `LOCAL_ZLIB`) travel with the
 targets, so a consumer sees the same layouts the archives were built with.
+The targets also carry native thread support and, for an instrumented build,
+the sanitizer runtime link options.
 
 Link either `ghidra::sla` or `ghidra::decomp`, not both: `ghidra::decomp`
 already contains every object in `ghidra::sla`.
+
+## Native lifetime and concurrency
+
+Each live `SleighArchitecture` owns its translator. Destroying a successfully
+initialized architecture retains at most one idle translator per language, so
+the next architecture can reuse the decoded specification without sharing a
+live loader or context. Reuse restores the language's address-space settings
+before applying the next program's configuration; failed initialization is
+not cached.
+
+Initialize the library once and serialize architecture construction and
+destruction. Exclusive translators and reentrant XML parsing do not make all
+native code thread-safe: language registries, address-space reference counts,
+and the p-code/C parsers still have shared state. The parallel regression
+covers two preinitialized, independent engines, not arbitrary simultaneous
+initialization or dynamic p-code injection.

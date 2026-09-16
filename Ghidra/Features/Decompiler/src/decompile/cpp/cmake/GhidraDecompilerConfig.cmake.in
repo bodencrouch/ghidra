@@ -15,6 +15,7 @@ if(EXISTS "@PACKAGE_GHIDRA_DECOMP_INSTALL_SLEIGH_HOME@")
 endif()
 
 include(CMakeFindDependencyMacro)
+find_dependency(Threads)
 if(NOT GhidraDecompiler_HAVE_LOCAL_ZLIB)
   find_dependency(ZLIB)
 endif()

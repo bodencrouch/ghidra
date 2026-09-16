@@ -42,6 +42,8 @@ function(ghidra_sleigh_compile_specs)
   if(NOT ARG_OUTPUT_DIR)
     message(FATAL_ERROR "ghidra_sleigh_compile_specs: OUTPUT_DIR is required")
   endif()
+  get_filename_component(ARG_OUTPUT_DIR "${ARG_OUTPUT_DIR}" ABSOLUTE
+    BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
   if(NOT ARG_PROCESSORS_ROOT)
     get_filename_component(ARG_PROCESSORS_ROOT
       "${CMAKE_CURRENT_LIST_DIR}/../../../../../Processors" ABSOLUTE)
@@ -65,6 +67,7 @@ function(ghidra_sleigh_compile_specs)
 
   set(_all_sla)
   set(_all_stamps)
+  set(_owned)
   foreach(_proc IN LISTS ARG_PROCESSORS)
     set(_langdir "${ARG_PROCESSORS_ROOT}/${_proc}/data/languages")
     if(NOT IS_DIRECTORY "${_langdir}")
@@ -75,7 +78,10 @@ function(ghidra_sleigh_compile_specs)
     # Options from build.gradle: sleighCompileOptions = [ '-l', "-t" ]
     set(_options)
     set(_gradle "${ARG_PROCESSORS_ROOT}/${_proc}/build.gradle")
+    set(_option_dependency)
     if(EXISTS "${_gradle}")
+      set(_option_dependency "${_gradle}")
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_gradle}")
       file(READ "${_gradle}" _gradle_text)
       string(REGEX MATCH "sleighCompileOptions[ \t]*=[ \t]*\\[([^]]*)\\]" _m "${_gradle_text}")
       if(_m)
@@ -88,9 +94,10 @@ function(ghidra_sleigh_compile_specs)
     endif()
 
     # Which .sla files do the .ldefs ask for?
-    file(GLOB _ldefs "${_langdir}/*.ldefs")
+    file(GLOB _ldefs CONFIGURE_DEPENDS "${_langdir}/*.ldefs")
     set(_wanted_sla)
     foreach(_ld IN LISTS _ldefs)
+      set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_ld}")
       file(READ "${_ld}" _ld_text)
       string(REGEX MATCHALL "slafile=\"[^\"]*\"" _refs "${_ld_text}")
       foreach(_r IN LISTS _refs)
@@ -100,8 +107,8 @@ function(ghidra_sleigh_compile_specs)
     endforeach()
     list(REMOVE_DUPLICATES _wanted_sla)
 
-    file(GLOB _slaspecs "${_langdir}/*.slaspec")
-    file(GLOB _sincs "${_langdir}/*.sinc")
+    file(GLOB _slaspecs CONFIGURE_DEPENDS "${_langdir}/*.slaspec")
+    file(GLOB _sincs CONFIGURE_DEPENDS "${_langdir}/*.sinc")
     set(_proc_sla)
     foreach(_spec IN LISTS _slaspecs)
       get_filename_component(_name "${_spec}" NAME_WE)
@@ -114,7 +121,7 @@ function(ghidra_sleigh_compile_specs)
         OUTPUT "${_out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_outdir}"
         COMMAND "${_compiler_cmd}" ${_options} "${_spec}" "${_out}"
-        DEPENDS "${_spec}" ${_sincs} ${_compiler_dep}
+        DEPENDS "${_spec}" ${_sincs} ${_compiler_dep} ${_option_dependency}
         COMMENT "sleigh ${_proc}/${_name}.slaspec"
         ${_pool_arg}
         VERBATIM
@@ -127,9 +134,13 @@ function(ghidra_sleigh_compile_specs)
     list(APPEND _all_sla ${_proc_sla})
 
     # Support files next to the .sla files.
-    file(GLOB _support LIST_DIRECTORIES false "${_langdir}/*")
+    file(GLOB _support CONFIGURE_DEPENDS LIST_DIRECTORIES false "${_langdir}/*")
     list(FILTER _support EXCLUDE REGEX "\\.(slaspec|sinc|sla)$")
     set(_stamp "${_outdir}/.support-files.stamp")
+    foreach(_input IN LISTS _support)
+      get_filename_component(_name "${_input}" NAME)
+      list(APPEND _owned "${_outdir}/${_name}")
+    endforeach()
     add_custom_command(
       OUTPUT "${_stamp}"
       COMMAND "${CMAKE_COMMAND}" -E make_directory "${_outdir}"
@@ -144,6 +155,21 @@ function(ghidra_sleigh_compile_specs)
     string(REPLACE ";" " " _opt_str "${_options}")
     message(STATUS "sleigh specs: ${_proc}: ${_n} spec(s), options: ${_opt_str}")
   endforeach()
+
+  # Keep ownership in the build tree, not the configurable output directory.
+  # Reconfiguration also handles removed processors and a changed output root.
+  list(APPEND _owned ${_all_sla} ${_all_stamps})
+  set(_manifest "${CMAKE_CURRENT_BINARY_DIR}/${ARG_TARGET}-owned-files.txt")
+  if(EXISTS "${_manifest}")
+    file(STRINGS "${_manifest}" _previous)
+    foreach(_file IN LISTS _previous)
+      if(NOT _file IN_LIST _owned)
+        file(REMOVE "${_file}")
+      endif()
+    endforeach()
+  endif()
+  string(REPLACE ";" "\n" _manifest_content "${_owned}")
+  file(WRITE "${_manifest}" "${_manifest_content}\n")
 
   add_custom_target(${ARG_TARGET} ALL DEPENDS ${_all_sla} ${_all_stamps})
   set_property(TARGET ${ARG_TARGET} PROPERTY GHIDRA_SLEIGH_HOME "${ARG_OUTPUT_DIR}")
