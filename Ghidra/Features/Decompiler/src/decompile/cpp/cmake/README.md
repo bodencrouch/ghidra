@@ -152,6 +152,8 @@ compiled. Per-processor compiler options come from `sleighCompileOptions` in
 `Ghidra/Processors/<P>/build.gradle`, the same source the Gradle build
 reads. Each spec compiles in single-file mode with an explicit output path,
 so `@include` resolves against the source tree and no file is written there.
+Every output depends on the processor's `.slaspec` and `.sinc` files; changing
+an included source cannot leave a stale sibling `.sla` in the generated tree.
 
 The build records its generated/copied paths in a build-directory manifest.
 Reconfiguration removes obsolete paths from that list, including files for

@@ -121,7 +121,7 @@ function(ghidra_sleigh_compile_specs)
         OUTPUT "${_out}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${_outdir}"
         COMMAND "${_compiler_cmd}" ${_options} "${_spec}" "${_out}"
-        DEPENDS "${_spec}" ${_sincs} ${_compiler_dep} ${_option_dependency}
+        DEPENDS ${_slaspecs} ${_sincs} ${_compiler_dep} ${_option_dependency}
         COMMENT "sleigh ${_proc}/${_name}.slaspec"
         ${_pool_arg}
         VERBATIM
