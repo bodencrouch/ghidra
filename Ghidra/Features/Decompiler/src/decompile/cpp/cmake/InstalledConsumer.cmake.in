@@ -1,0 +1,45 @@
+# Exercise only installed usage requirements in a separate CMake project.
+set(root "@CMAKE_CURRENT_BINARY_DIR@/installed-consumer")
+set(prefix "${root}/prefix")
+execute_process(
+  COMMAND "@CMAKE_COMMAND@" --install "@CMAKE_CURRENT_BINARY_DIR@"
+    --prefix "${prefix}" --config "${CONFIG}"
+  RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "Installation failed: ${output}\n${error}")
+endif()
+
+file(MAKE_DIRECTORY "${root}/source")
+configure_file("@CMAKE_CURRENT_SOURCE_DIR@/cmake/smoke/decomp_smoke.cc"
+  "${root}/source/main.cc" COPYONLY)
+file(WRITE "${root}/source/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.24)
+project(InstalledConsumer LANGUAGES CXX)
+find_package(GhidraDecompiler REQUIRED CONFIG)
+add_executable(consumer main.cc)
+target_link_libraries(consumer PRIVATE ghidra::decomp)
+enable_testing()
+add_test(NAME capabilities COMMAND consumer --check-capabilities)
+]=])
+execute_process(
+  COMMAND "@CMAKE_COMMAND@" -S "${root}/source" -B "${root}/build"
+    -G "@CMAKE_GENERATOR@" "-DCMAKE_CXX_COMPILER=@CMAKE_CXX_COMPILER@"
+    "-DGhidraDecompiler_DIR=${prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/GhidraDecompiler"
+    "-DCMAKE_BUILD_TYPE=${CONFIG}"
+  RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "Installed consumer configure failed")
+endif()
+execute_process(
+  COMMAND "@CMAKE_COMMAND@" --build "${root}/build" --config "${CONFIG}"
+  RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "Installed consumer build failed")
+endif()
+execute_process(
+  COMMAND "@CMAKE_CTEST_COMMAND@" --test-dir "${root}/build"
+    -C "${CONFIG}" --output-on-failure
+  RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "Installed consumer capability check failed")
+endif()

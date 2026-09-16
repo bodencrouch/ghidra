@@ -441,4 +441,11 @@ if(GHIDRA_DECOMP_INSTALL)
     "${CMAKE_CURRENT_BINARY_DIR}/GhidraDecompilerConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/GhidraDecompilerConfigVersion.cmake"
     DESTINATION "${_config_dir}")
+  if(GHIDRA_DECOMP_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL AND NOT CMAKE_CROSSCOMPILING)
+    configure_file(cmake/InstalledConsumer.cmake.in InstalledConsumer.cmake @ONLY)
+    add_test(NAME installed_consumer
+      COMMAND "${CMAKE_COMMAND}" "-DCONFIG=$<CONFIG>"
+        -P "${CMAKE_CURRENT_BINARY_DIR}/InstalledConsumer.cmake")
+    set_tests_properties(installed_consumer PROPERTIES LABELS "install;smoke")
+  endif()
 endif()

@@ -112,6 +112,7 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | `no_jvm_linkage` | isolation | No built program links `libjvm`, `libjava`, `libjli` or `libjawt` (`ldd`, `otool -L` or `readelf -d`). |
 | `no_jvm_runtime` | isolation | `sleigh_smoke` runs under `env -i PATH=/usr/bin HOME=/nonexistent LANG=C`. With `strace` present, exactly one `execve` is recorded: no child process. |
 | `no_ghidra_process_symbols` | isolation | `nm` finds no `GhidraCapability` or `GhidraCommand` symbol in `libdecomp_archive.a`. |
+| `installed_consumer` | install, smoke | Installs into the build directory, builds a separate `find_package` consumer using only installed headers/targets, and checks capability registration. Enabled for native top-level builds with installation enabled. |
 
 Run a subset with labels, for example `ctest --test-dir build -L smoke`.
 
