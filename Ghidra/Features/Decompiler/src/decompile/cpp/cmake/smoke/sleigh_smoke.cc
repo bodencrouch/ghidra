@@ -38,6 +38,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -174,6 +175,40 @@ const SmokeCase *findCase(const string &name)
   return (const SmokeCase *)0;
 }
 
+/// Unique-space offsets are internal temporary identifiers.  Preserve their
+/// aliasing, but compare them by first occurrence so harmless allocator shifts
+/// do not invalidate the semantic smoke fixture.
+string normalizeUniqueOffsets(const string &text)
+
+{
+  std::map<string,string> names;
+  string result;
+  string::size_type pos = 0;
+  while(true) {
+    string::size_type start = text.find("unique[0x",pos);
+    if (start == string::npos) {
+      result.append(text,pos,string::npos);
+      break;
+    }
+    string::size_type end = text.find(':',start + 9);
+    if (end == string::npos) {
+      result.append(text,pos,string::npos);
+      break;
+    }
+    result.append(text,pos,start - pos);
+    string offset = text.substr(start + 7,end - (start + 7));
+    std::map<string,string>::iterator iter = names.find(offset);
+    if (iter == names.end()) {
+      ostringstream name;
+      name << 'u' << names.size();
+      iter = names.insert(std::make_pair(offset,name.str())).first;
+    }
+    result += "unique[" + iter->second;
+    pos = end;
+  }
+  return result;
+}
+
 void runCase(const string &sleighhome,const SmokeCase &sc,ostream &out)
 
 {
@@ -265,13 +300,15 @@ int main(int argc,char **argv)
   }
   ostringstream expected;
   expected << in.rdbuf();
-  if (expected.str() == produced) {
+  string comparableProduced = normalizeUniqueOffsets(produced);
+  string comparableExpected = normalizeUniqueOffsets(expected.str());
+  if (comparableExpected == comparableProduced) {
     cerr << casename << ": output matches " << expectfile << endl;
     return 0;
   }
   cerr << casename << ": output differs from " << expectfile << endl;
-  istringstream a(produced);
-  istringstream b(expected.str());
+  istringstream a(comparableProduced);
+  istringstream b(comparableExpected);
   string la,lb;
   int4 lineno = 0;
   while(true) {

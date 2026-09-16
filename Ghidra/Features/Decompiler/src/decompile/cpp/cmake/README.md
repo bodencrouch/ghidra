@@ -70,7 +70,7 @@ podman run --rm -v "$PWD":/src:Z -w /src registry.fedoraproject.org/fedora:44 \
 | `GHIDRA_DECOMP_SANITIZE` | empty | Value for `-fsanitize=` on every target, for example `address,undefined`. |
 | `GHIDRA_DECOMP_BUILD_TOOLS` | `ON` | Build `sleigh_compiler` and `decomp_console`. |
 | `GHIDRA_DECOMP_BUILD_TESTS` | `ON` when top level | Build `decomp_test`, `sleigh_smoke`, `decomp_smoke` and register the tests. |
-| `GHIDRA_DECOMP_SPEC_PROCESSORS` | `x86;ARM;AARCH64` | Processor directories whose `.slaspec` files are compiled into the sleigh home. Empty disables spec compilation and the tests that need it. |
+| `GHIDRA_DECOMP_SPEC_PROCESSORS` | `x86;ARM;AARCH64;Toy;PowerPC;MIPS` | Processor directories whose `.slaspec` files are compiled into the sleigh home. Empty disables spec compilation and the tests that need it. |
 | `GHIDRA_DECOMP_CXX_STANDARD` | `11` | C++ standard for the sources. The Gradle build uses `-std=c++11`. |
 | `GHIDRA_DECOMP_INSTALL` | `ON` when top level | Generate install and export rules. |
 | `GHIDRA_DECOMP_CHECK_MANIFEST` | `ON` | Compare `cmake/GhidraDecompSources.cmake` with the `Makefile` at configure time and stop on a difference. |
@@ -108,7 +108,7 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | `manifest_matches_makefile` | manifest | The source manifest equals the `Makefile` sets. |
 | `manifest_matches_makefile_master` | manifest | Same against `GHIDRA_DECOMP_MASTER_MAKEFILE`, when set. |
 | `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). |
-| `decomp_datatests` | data | `decomp_test datatests` over the `../datatests` files whose language the compiled processors provide. With the default processors, 72 of 83. |
+| `decomp_datatests` | data | `decomp_test datatests` over the `../datatests` files whose language the compiled processors provide. On current master, the default processors cover 87 of 89. |
 | `sleigh_smoke_x86-64`, `sleigh_smoke_arm-thumb`, `sleigh_smoke_aarch64` | smoke | `sleigh_smoke` disassembles and translates fixed bytes with the built `.sla` files and compares with `cmake/smoke/expected/<case>.txt`. |
 | `capability_linkage` | smoke, isolation | `decomp_smoke --check-capabilities`: `xml`, `raw`, `c-language`, `java-language` are registered; `bfd` only with `GHIDRA_DECOMP_BFD`. |
 | `no_jvm_linkage` | isolation | No built program links `libjvm`, `libjava`, `libjli` or `libjawt` (`ldd`, `otool -L` or `readelf -d`). |
@@ -120,7 +120,9 @@ Run a subset with labels, for example `ctest --test-dir build -L smoke`.
 `sleigh_smoke <sleigh-home> <case>` prints one block per instruction: the
 address, mnemonic and operands, then one indented line per p-code op with
 varnodes as `space[offset:size]`. The expected files were generated once
-and reviewed by hand. Regenerate one with
+and reviewed by hand. During comparison, unique-space offsets are named by
+first occurrence because they are internal temporary identifiers; their reuse
+and the rest of each p-code operation remain exact. Regenerate one with
 `build/sleigh_smoke build/sleigh-home x86-64 > cmake/smoke/expected/x86-64.txt`
 after a deliberate change to a spec.
 
@@ -160,6 +162,7 @@ project(consumer CXX)
 find_package(GhidraDecompiler 12 REQUIRED)
 add_executable(consumer main.cc)
 target_link_libraries(consumer PRIVATE ghidra::decomp)
+target_compile_definitions(consumer PRIVATE SLEIGH_HOME="${GhidraDecompiler_SLEIGH_HOME}")
 message(STATUS "sla format ${GhidraDecompiler_SLA_FORMAT_VERSION}, specs in ${GhidraDecompiler_SLEIGH_HOME}")
 ```
 

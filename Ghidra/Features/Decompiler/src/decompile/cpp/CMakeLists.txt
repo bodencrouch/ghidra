@@ -228,7 +228,8 @@ add_library(ghidra::decomp_archive ALIAS decomp_archive)
 # c-language, java-language, ...) register themselves from static
 # initializers, and a plain archive drops the objects nothing references.
 add_library(decomp INTERFACE)
-target_link_libraries(decomp INTERFACE $<LINK_LIBRARY:WHOLE_ARCHIVE,decomp_archive>)
+target_link_libraries(decomp INTERFACE
+  $<LINK_LIBRARY:WHOLE_ARCHIVE,$<TARGET_NAME:decomp_archive>>)
 add_library(ghidra::decomp ALIAS decomp)
 
 # ---------------------------------------------------------------------------
