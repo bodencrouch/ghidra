@@ -145,6 +145,26 @@ public class ParallelDecompiler {
 		return new ChunkingParallelDecompiler<>(callback, monitor);
 	}
 
+	/**
+	 * Creates a reusable chunked decompiler with an explicit concurrency limit. The limit
+	 * applies only to this queue, not other users of the shared executor. Each submitted chunk
+	 * bounds the number of queued functions and retained results; submit chunks sequentially.
+	 *
+	 * <p>Reusing a {@link DecompilerCallback} also reuses its initialized decompilers across
+	 * chunks. Closing the returned queue does not dispose the callback: its caller retains
+	 * ownership and must dispose it after processing finishes.
+	 *
+	 * @param callback the callback required to perform work
+	 * @param maxInProgress the maximum concurrent callbacks; must be positive
+	 * @param monitor the progress and cancellation monitor
+	 * @return the reusable parallel decompiler
+	 * @throws IllegalArgumentException if maxInProgress is not positive
+	 */
+	public static <R> ChunkingParallelDecompiler<R> createChunkingParallelDecompiler(
+			QCallback<Function, R> callback, int maxInProgress, TaskMonitor monitor) {
+		return new ChunkingParallelDecompiler<>(callback, maxInProgress, monitor);
+	}
+
 	private ParallelDecompiler() {
 		// only use statically
 	}

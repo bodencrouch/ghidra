@@ -59,10 +59,28 @@ public class DecompilerConcurrentQ<I, R> {
 
 	public DecompilerConcurrentQ(QCallback<I, R> callback, GThreadPool pool, boolean collectResults,
 			TaskMonitor monitor) {
+		this(callback, pool, collectResults, 0, monitor);
+	}
+
+	/**
+	 * Creates a queue with a per-queue concurrency limit, without changing the supplied pool.
+	 *
+	 * @param callback the work to perform
+	 * @param pool the thread pool
+	 * @param collectResults whether to retain completed results
+	 * @param maxInProgress the maximum concurrent callbacks, or zero to use the pool limit
+	 * @param monitor the progress and cancellation monitor
+	 */
+	public DecompilerConcurrentQ(QCallback<I, R> callback, GThreadPool pool, boolean collectResults,
+			int maxInProgress, TaskMonitor monitor) {
+		if (maxInProgress < 0) {
+			throw new IllegalArgumentException("maxInProgress must not be negative");
+		}
 		// @formatter:off
 		queue = new ConcurrentQBuilder<I, R>()
 			.setCollectResults(collectResults)
 			.setThreadPool(pool)
+			.setMaxInProgress(maxInProgress)
 			.setMonitor(monitor)
 			.setListener(new InternalResultListener())
 			.build(callback);

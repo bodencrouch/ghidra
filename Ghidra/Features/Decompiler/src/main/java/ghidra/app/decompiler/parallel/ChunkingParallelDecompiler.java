@@ -15,13 +15,12 @@
  */
 package ghidra.app.decompiler.parallel;
 
-import generic.concurrent.QCallback;
-import generic.concurrent.QResult;
+import java.util.*;
+
+import generic.concurrent.*;
 import ghidra.app.util.DecompilerConcurrentQ;
 import ghidra.program.model.listing.Function;
 import ghidra.util.task.TaskMonitor;
-
-import java.util.*;
 
 /**
  * A class that simplifies some the concurrent datastructure setup required for decompiling 
@@ -30,7 +29,7 @@ import java.util.*;
  *
  * @param <R> The result type
  */
-public class ChunkingParallelDecompiler<R> {
+public class ChunkingParallelDecompiler<R> implements AutoCloseable {
 
 	private DecompilerConcurrentQ<Function, R> queue;
 
@@ -38,6 +37,16 @@ public class ChunkingParallelDecompiler<R> {
 		queue =
 			new DecompilerConcurrentQ<Function, R>(callback, ParallelDecompiler.THREAD_POOL_NAME,
 				monitor);
+	}
+
+	ChunkingParallelDecompiler(QCallback<Function, R> callback, int maxInProgress,
+			TaskMonitor monitor) {
+		if (maxInProgress <= 0) {
+			throw new IllegalArgumentException("maxInProgress must be positive");
+		}
+		queue = new DecompilerConcurrentQ<>(callback,
+			GThreadPool.getSharedThreadPool(ParallelDecompiler.THREAD_POOL_NAME), true,
+			maxInProgress, monitor);
 	}
 
 	public List<R> decompileFunctions(List<Function> functions) throws InterruptedException,
@@ -57,5 +66,14 @@ public class ChunkingParallelDecompiler<R> {
 
 	public void dispose() {
 		queue.dispose();
+	}
+
+	/**
+	 * Disposes the queue. The caller still owns the callback and must dispose a
+	 * {@link DecompilerCallback} after all its work has stopped.
+	 */
+	@Override
+	public void close() {
+		dispose();
 	}
 }
