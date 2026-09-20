@@ -37,8 +37,9 @@ The CMake build produces:
   `c-language`, `java-language`) register themselves from static
   initializers; a normal archive link drops them.
 - `sleigh_compiler`: the SLEIGH compiler (`slgh_compile.cc`).
-- `decomp_console`: the interactive console (`consolemain.cc`, the
-  `Makefile`'s `decomp_dbg`).
+- `decomp_console`: the interactive `consolemain.cc` front end linked to the
+  standalone archive. Unlike the Makefile's `decomp_dbg`/`decomp_opt`, it does
+  not include the libbfd loader or signature-analysis console commands.
 - `decomp_test`: the unit and data test runner (`test.cc`).
 - A sleigh home: compiled `.sla` files and their support files for the
   processors in `GHIDRA_DECOMP_SPEC_PROCESSORS`.
@@ -180,8 +181,18 @@ The build records its generated/copied paths in a build-directory manifest.
 Reconfiguration removes obsolete paths from that list, including files for
 removed processors, but preserves unrecorded files in the output tree.
 
-`decomp_test` and the console take this directory with `-sleighpath` or
-through `SLEIGHHOME` with `-usesleighenv`.
+`decomp_test` takes this root directory with `-sleighpath`, or reads it from
+`SLEIGHHOME` when passed `-usesleighenv`.
+
+The console has different arguments: `-s` adds a language directory directly
+and may be repeated. For example, to use the generated x86 specifications:
+
+```sh
+build/decomp_console -s build/sleigh-home/Ghidra/Processors/x86/data/languages
+```
+
+Without an explicit language directory, the console searches its discovered
+Ghidra installation root, falling back to `SLEIGHHOME` only when no root is found.
 
 ## Install and use from another project
 
