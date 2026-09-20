@@ -5,6 +5,27 @@ It does not change the Gradle build and it does not modify any source file.
 It exists so the native code can be built, tested and linked from other
 programs without a JVM, Gradle or Java on the machine.
 
+## Relationship to existing Ghidra usage
+
+This is an optional build path. Existing Gradle and Makefile commands, the
+Java decompiler APIs, native process protocol, scripts, project formats, and
+processor specifications retain their existing implementations. The standalone
+console is not a replacement for the `decompile` executable used by Ghidra.
+
+Ghidra already supports repeated decompilations through a persistent
+`DecompInterface` and pools interfaces through `DecompilerCallback` and
+`ParallelDecompiler`. Multiple native workers can share one JVM host. This
+build does not change that scheduling or demonstrate a performance improvement.
+
+The motivation overlaps with [the standalone SLEIGH library proposal
+(#3652)](https://github.com/NationalSecurityAgency/ghidra/issues/3652) and the
+existing [lifting-bits/sleigh CMake build](https://github.com/lifting-bits/sleigh):
+let native consumers reuse Ghidra's engine without maintaining their own source
+lists and build integration. Here the build lives beside the sources and checks
+its source manifest against the Makefile. It does not introduce a stable C++
+ABI across Ghidra releases; consumers must use matching headers, libraries,
+specifications, and build definitions.
+
 The CMake build produces:
 
 - `libsla.a`: SLEIGH only (disassembly, p-code translation, emulation).
