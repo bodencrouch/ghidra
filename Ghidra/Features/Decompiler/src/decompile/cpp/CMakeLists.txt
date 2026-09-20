@@ -3,9 +3,12 @@
 # This build does not replace the Gradle build.  It exists so that the
 # native code can be built, tested and consumed without a JVM or Gradle:
 #
-#   cmake -S . -B build -G Ninja
-#   cmake --build build
-#   ctest --test-dir build --output-on-failure
+#   cmake -S . -B ../../../build/cmake -G Ninja
+#   cmake --build ../../../build/cmake
+#   ctest --test-dir ../../../build/cmake --output-on-failure
+#
+# Keep the build directory outside src/decompile: the Gradle source
+# distribution packages that whole tree.
 #
 # See cmake/README.md for the options, the test list and a consumer example.
 #
@@ -37,7 +40,8 @@ include(CMakePackageConfigHelpers)
 find_package(Threads REQUIRED)
 
 # ---------------------------------------------------------------------------
-# Options.  Defaults follow the Gradle build where one exists.
+# Options.  Defaults give a system-zlib host build with the console; the
+# Gradle sleigh build differs in that it compiles the bundled zlib.
 option(GHIDRA_DECOMP_LOCAL_ZLIB "Compile the bundled ../zlib instead of linking the system zlib" OFF)
 option(GHIDRA_DECOMP_CONSOLE "Build the console command interface (needed by decomp_console and decomp_test)" ON)
 cmake_dependent_option(GHIDRA_DECOMP_TERMINAL "Terminal line editing for the console (defines __TERMINAL__)" ON
@@ -73,6 +77,9 @@ if(NOT DEFINED CMAKE_POSITION_INDEPENDENT_CODE)
 endif()
 
 if(GHIDRA_DECOMP_SANITIZE)
+  if(MSVC)
+    message(FATAL_ERROR "GHIDRA_DECOMP_SANITIZE uses the GCC/Clang -fsanitize= syntax; it is not supported with MSVC")
+  endif()
   add_compile_options(-fsanitize=${GHIDRA_DECOMP_SANITIZE} -fno-omit-frame-pointer)
   add_link_options(-fsanitize=${GHIDRA_DECOMP_SANITIZE})
 endif()
@@ -115,6 +122,10 @@ if(GHIDRA_DECOMP_LOCAL_ZLIB)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS LINUX _LINUX)
+elseif(WIN32)
+  # filemanage.cc and types.h select their Windows code on _WINDOWS, which
+  # the Gradle build defines together with WINDOWS.
+  list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS WINDOWS _WINDOWS)
 endif()
 
 set(GHIDRA_DECOMP_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/ghidra/decompiler")
@@ -436,12 +447,16 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       set_tests_properties(no_jvm_runtime PROPERTIES LABELS "isolation")
     endif()
 
-    add_test(NAME no_ghidra_process_symbols
-      COMMAND "${CMAKE_COMMAND}" -DMODE=symbols "-DNM=${CMAKE_NM}"
-              "-DARCHIVE=$<TARGET_FILE:decomp_archive>"
-              "-DPATTERN=GhidraCapability|GhidraCommand"
-              -P "${_cmake_dir}/NoJvmCheck.cmake")
-    set_tests_properties(no_ghidra_process_symbols PROPERTIES LABELS "isolation")
+    if(CMAKE_NM)
+      add_test(NAME no_ghidra_process_symbols
+        COMMAND "${CMAKE_COMMAND}" -DMODE=symbols "-DNM=${CMAKE_NM}"
+                "-DARCHIVE=$<TARGET_FILE:decomp_archive>"
+                "-DPATTERN=GhidraCapability|GhidraCommand"
+                -P "${_cmake_dir}/NoJvmCheck.cmake")
+      set_tests_properties(no_ghidra_process_symbols PROPERTIES LABELS "isolation")
+    else()
+      message(STATUS "no_ghidra_process_symbols not registered: CMAKE_NM is not set")
+    endif()
   endif()
 endif()
 
@@ -469,7 +484,8 @@ if(GHIDRA_DECOMP_INSTALL)
   endif()
   if(_have_specs)
     install(DIRECTORY "${GHIDRA_DECOMP_SLEIGH_HOME}/" DESTINATION "${GHIDRA_DECOMP_INSTALL_SLEIGH_HOME}"
-      PATTERN ".support-files.stamp" EXCLUDE)
+      PATTERN ".support-files.stamp" EXCLUDE
+      PATTERN ".sleigh-home-owned-by-cmake" EXCLUDE)
   endif()
 
   set(_config_dir "${CMAKE_INSTALL_LIBDIR}/cmake/GhidraDecompiler")

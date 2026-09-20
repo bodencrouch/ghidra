@@ -104,6 +104,10 @@ function(ghidra_decomp_check_manifest makefile source_dir)
 
   # EXTRA = $(filter-out CORE DECCORE SLEIGH GHIDRA SLACOMP SPECIAL, ALL_NAMES)
   file(GLOB _all_cc RELATIVE "${source_dir}" "${source_dir}/*.cc")
+  # Local extension sources (coreext_*, ghidraext_*, consoleext_*) are ignored
+  # by ../.gitignore and reach the Makefile only through the *EXT_NAMES
+  # variables dropped above, so they are outside the manifest on both sides.
+  list(FILTER _all_cc EXCLUDE REGEX "^(coreext|ghidraext|consoleext)_")
   set(_MK_ALL "")
   foreach(_f IN LISTS _all_cc)
     string(REGEX REPLACE "\\.cc$" "" _n "${_f}")

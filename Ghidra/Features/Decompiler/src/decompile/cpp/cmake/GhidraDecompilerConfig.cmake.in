@@ -1,5 +1,12 @@
 @PACKAGE_INIT@
 
+if(CMAKE_VERSION VERSION_LESS 3.24)
+  set(GhidraDecompiler_NOT_FOUND_MESSAGE
+    "GhidraDecompiler needs CMake 3.24 or newer: ghidra::decomp uses the WHOLE_ARCHIVE link feature")
+  set(GhidraDecompiler_FOUND FALSE)
+  return()
+endif()
+
 # Exported build facts.
 set(GhidraDecompiler_GHIDRA_VERSION "@GHIDRA_DECOMP_GHIDRA_VERSION@")
 set(GhidraDecompiler_SLA_FORMAT_VERSION @GHIDRA_DECOMP_SLA_FORMAT_VERSION@)
