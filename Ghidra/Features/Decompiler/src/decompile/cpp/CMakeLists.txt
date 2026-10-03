@@ -623,6 +623,8 @@ if(GHIDRA_DECOMP_INSTALL)
   install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/GhidraDecompilerConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/GhidraDecompilerConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/SleighCompileSpecs.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildSafety.cmake"
     DESTINATION "${_config_dir}")
   install(CODE "set(GHIDRA_INSTALL_PHASE commit)\ninclude(\"${CMAKE_CURRENT_SOURCE_DIR}/cmake/InstallSleighHome.cmake\")"
     COMPONENT SleighHome)

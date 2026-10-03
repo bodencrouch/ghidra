@@ -26,6 +26,22 @@ its source manifest against the Makefile. It does not introduce a stable C++
 ABI across Ghidra releases; consumers must use matching headers, libraries,
 specifications, and build definitions.
 
+The existing Java reuse/pooling route is also the accepted answer to
+[discussion #2903](https://github.com/NationalSecurityAgency/ghidra/discussions/2903).
+[Issue #2171](https://github.com/NationalSecurityAgency/ghidra/issues/2171)
+describes batch headless export, which still belongs to the application and
+script layer. This patch adds neither import orchestration nor scheduling.
+Standalone CMake SLEIGH builds already exist in lifting-bits/sleigh; this
+integration supplies an in-tree source manifest and the decompiler archive.
+These references provide motivation, not upstream endorsement.
+
+The manifest supports the chosen 12.1 source tree and the concrete 12.2
+`metatype.cc` addition. It still rejects other source-list drift by default.
+Upstream changes to public native signatures, metatype serialization, and
+compiler-spec formats in 12.2 are source-version boundaries. Matching source
+lists do not establish cross-version ABI or format compatibility, and unknown
+future revisions remain unproven.
+
 The CMake build produces:
 
 - `libsla.a`: SLEIGH only (disassembly, p-code translation, emulation).
@@ -65,7 +81,7 @@ ctest --test-dir $B --output-on-failure
 Requirements: CMake 3.24 or newer, a C++11 compiler, zlib development
 files (or `-DGHIDRA_DECOMP_LOCAL_ZLIB=ON` to compile the bundled copy).
 Ninja is recommended: the spec compilation uses a Ninja job pool so that
-at most two `.sla` files compile at once. The default processor set
+one `.sla` file compiles at a time. The default processor set
 compiles 58 specifications; `x86-64` and `AARCH64` each take minutes and
 more than 1 GB of memory. Set `GHIDRA_DECOMP_SPEC_PROCESSORS` to a smaller
 list (for example `x86`) for a faster build.
@@ -185,6 +201,12 @@ Every output depends on the processor's `.slaspec` and `.sinc` files; changing
 an included source cannot leave a stale sibling `.sla` in the generated tree.
 
 The build records its generated/copied paths in a build-directory manifest.
+Support selection accepts direct `.ldefs`, `.pspec`, `.cspec`, `.opinion`,
+`.dwarf`, `.gdis`, and `.register.info` files. Java `.sla.lock` files, logs,
+stamps, and other files remain in their source location and are not copied or
+advertised for installation. Supporting a new upstream metadata suffix requires
+an explicit update to this list. Output-home symlinks followed by `..` resolve
+against the physical symlink target before the ownership checks.
 Reconfiguration removes obsolete paths from that list, including files for
 removed processors, but preserves unrecorded files in the output tree.
 
@@ -254,6 +276,24 @@ decompiled skip/arithmetic behavior; when Toy is excluded, that check reports
 explicit nonavailability.
 
 A consumer:
+
+Installed `libdecomp.hh` keeps its unchanged transitive console declarations
+so it can be parsed in both configurations. Console implementation APIs are
+linkable only when `GhidraDecompiler_HAVE_CONSOLE` is true. Header presence
+alone does not grant implementation support. JVM-facing GHIDRA, BFD loader,
+BFD console, and standalone SLEIGH compiler implementation headers are excluded
+from the archive API.
+
+`CPUI_DEBUG`, `__TERMINAL__`, and `LOCAL_ZLIB` are public build requirements
+because they affect class layouts or embedded stream types. Platform macros
+remain private implementation settings. Consumers must not independently change
+these definitions or enable `CPUI_RULECOMPILE`. The package version-selection
+rule does not promise C++ ABI compatibility across Ghidra releases.
+
+The package also installs `SleighCompileSpecs.cmake` and its
+`BuildSafety.cmake` dependency beside the package configuration. Include the
+helper there and provide an explicit `PROCESSORS_ROOT` when compiling another
+matching source tree.
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)

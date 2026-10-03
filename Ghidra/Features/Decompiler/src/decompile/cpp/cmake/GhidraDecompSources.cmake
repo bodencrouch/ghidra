@@ -7,12 +7,22 @@
 # instead of a silent link failure.
 #
 # This file is included both by CMakeLists.txt and by the script-mode
-# manifest check.  It must only set variables.
+# manifest check. SOURCE_DIR selects that check's source tree.
 
 # CORE: used by every build.
 set(GHIDRA_DECOMP_CORE_SOURCES
   xml marshal space float address pcoderaw translate opcodes globalcontext
 )
+# Ghidra 12.2 moved the metatype implementation into its own CORE unit.
+# Recognize this concrete upstream change; all other drift still fails closed.
+set(_ghidra_manifest_source "${CMAKE_CURRENT_LIST_DIR}/..")
+if(CMAKE_SCRIPT_MODE_FILE AND SOURCE_DIR)
+  set(_ghidra_manifest_source "${SOURCE_DIR}")
+endif()
+if(EXISTS "${_ghidra_manifest_source}/metatype.cc")
+  list(APPEND GHIDRA_DECOMP_CORE_SOURCES metatype)
+endif()
+unset(_ghidra_manifest_source)
 
 # DECCORE, split so the four translation units that the Makefile's
 # LIBSLA_NAMES also needs can go into the `sla` archive.
