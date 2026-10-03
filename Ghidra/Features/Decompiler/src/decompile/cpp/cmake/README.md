@@ -35,10 +35,12 @@ Standalone CMake SLEIGH builds already exist in lifting-bits/sleigh; this
 integration supplies an in-tree source manifest and the decompiler archive.
 These references provide motivation, not upstream endorsement.
 
-The manifest supports the chosen 12.1 source tree and the concrete 12.2
-`metatype.cc` addition. It still rejects other source-list drift by default.
-Upstream changes to public native signatures, metatype serialization, and
-compiler-spec formats in 12.2 are source-version boundaries. Matching source
+The manifest has been checked at source base `263160cf57db` and official-master
+snapshot `a462673d2f15`, both reporting 12.3 DEV. The latter adds
+`metatype.cc`; the manifest recognizes this concrete addition and still
+rejects other source-list drift by default. Upstream changes to public native
+signatures, metatype serialization, and compiler-spec formats between these
+revisions are source-version boundaries. Matching source
 lists do not establish cross-version ABI or format compatibility, and unknown
 future revisions remain unproven.
 
@@ -319,7 +321,7 @@ int main() {
 
 The config file exports `GhidraDecompiler_GHIDRA_VERSION`,
 `GhidraDecompiler_SLA_FORMAT_VERSION`, `GhidraDecompiler_SLEIGH_HOME`, and
-`GhidraDecompiler_HAVE_CONSOLE`, `_HAVE_TERMINAL`,
+`GhidraDecompiler_HAVE_BFD` (always `OFF`), `_HAVE_CONSOLE`, `_HAVE_TERMINAL`,
 `_HAVE_CPUI_DEBUG`, `_HAVE_LOCAL_ZLIB`. The compile definitions that change
 class layouts (`__TERMINAL__`, `CPUI_DEBUG`, `LOCAL_ZLIB`) travel with the
 targets, so a consumer sees the same layouts the archives were built with.
