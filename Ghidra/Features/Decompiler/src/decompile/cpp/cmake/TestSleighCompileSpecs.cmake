@@ -67,6 +67,15 @@ foreach(_proc Keep Drop)
     "def example = 'https://example.invalid/*quoted*/'\n"
     "def mentioned = 'sleighCompileOptions += [quoted-only]'\n"
     "sleighCompileOptions = [\n // '-bad-line'\n ${_options}, /* '-bad-inline' */\n]\n")
+  file(APPEND "${_processors}/${_proc}/build.gradle" [=[
+def plainMention = "sleighCompileOptions"
+def singleLiteral = '${sleighCompileOptions.add("-t")}'
+def escapedDollar = "\${sleighCompileOptions.add('-t')}"
+def mixedLiteral = "sleighCompileOptions ${other}"
+def interpolatedLiteral = "${'sleighCompileOptions'}"
+// def commented = "${sleighCompileOptions.add('-t')}"
+/* def blockCommented = "$sleighCompileOptions" */
+]=])
   file(WRITE "${_lang}/keep.slaspec" "${_spec}")
   file(WRITE "${_lang}/shared.sinc" "# shared include\n")
   file(WRITE "${_lang}/shared.slaspec" "# sibling include\n")
@@ -76,6 +85,18 @@ set(_lang "${_processors}/Keep/data/languages")
 file(WRITE "${_lang}/riscv.lp64d.slaspec" "${_spec}")
 file(APPEND "${_lang}/languages.ldefs" "<language slafile=\"riscv.lp64d.sla\"/>\n")
 file(WRITE "${_lang}/retired.pspec" "retired support\n")
+
+# Verify literal dollar values through the parser itself; these are lexical
+# cases, not flags to pass to the real SLEIGH compiler.
+include("${MODULE}")
+file(WRITE "${_root}/literal-options.gradle" [=[
+sleighCompileOptions = ['$flag', '${flag}', "\$flag", "\${flag}"]
+]=])
+_ghidra_sleigh_options("${_root}/literal-options.gradle" _literal_options)
+set(_expected_literals [=[$flag;${flag};$flag;${flag}]=])
+if(NOT _literal_options STREQUAL _expected_literals)
+  message(FATAL_ERROR "Literal option dollar semantics changed: ${_literal_options}")
+endif()
 
 function(run)
   execute_process(COMMAND ${ARGV} RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
@@ -140,6 +161,41 @@ foreach(_mutation
 endforeach()
 file(WRITE "${_processors}/Keep/build.gradle" "sleighCompileOptions += ['-t']\n")
 reject("unsupported executable.*sleighCompileOptions" ${_configure} -B "${_build}")
+# Groovy double-quoted interpolation is executable, even within another
+# variable's initializer. Bracket arguments preserve its literal dollar signs.
+foreach(_mutation
+    [=[def x = "${sleighCompileOptions.add('-t')}" ]=]
+    [=[def x = "$sleighCompileOptions" ]=]
+    [=[def x = "$project.sleighCompileOptions" ]=]
+    [=[def x = "\\${sleighCompileOptions.add('-t')}" ]=]
+    [=[def x = "${ { -> sleighCompileOptions.add('-t') }() }" ]=]
+    [=[def x = "${ /* } */ sleighCompileOptions.add('-t') }" ]=]
+    [=[def x = "${call("nested")}" ]=])
+  # Each direct interpolation use must fail before changing the home.
+  file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}\n${_mutation}\n")
+  snapshot("${_home}" _before)
+  reject("unsupported.*sleighCompileOptions" ${_configure} -B "${_build}")
+  snapshot("${_home}" _after)
+  if(NOT _before STREQUAL _after)
+    message(FATAL_ERROR "Executable interpolation changed the home")
+  endif()
+endforeach()
+foreach(_computed
+    [=[sleighCompileOptions = ["${flag}"]]=]
+    [=[sleighCompileOptions = ["$flag"]]=])
+  file(WRITE "${_processors}/Keep/build.gradle" "${_computed}\n")
+  reject("unsupported.*sleighCompileOptions" ${_configure} -B "${_build}")
+endforeach()
+file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}")
+
+file(WRITE "${_processors}/Keep/build.gradle" [=[
+def x = "${sleighCompileOptions.add('-t')}"
+]=])
+reject("unsupported.*sleighCompileOptions" ${_configure} -B "${_build}")
+file(WRITE "${_processors}/Keep/build.gradle" [=[
+sleighCompileOptions = ["\n"]
+]=])
+reject("unsupported escape.*sleighCompileOptions" ${_configure} -B "${_build}")
 file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}")
 
 # Both a dangling owned leaf and a dangling ancestor must fail before any
@@ -303,6 +359,15 @@ if(NOT _installable STREQUAL "" OR EXISTS "${_new_home}/${_keep}/keep.sla")
   message(FATAL_ERROR "Empty selection retained owned outputs")
 endif()
 if(SOURCE_DIR)
+  # Check compatibility with the checkout's actual Gradle option declarations
+  # without compiling its production language set or evaluating Groovy.
+  get_filename_component(_real_processors "${SOURCE_DIR}/../../../../../Processors" ABSOLUTE)
+  file(GLOB _gradle_files "${_real_processors}/*/build.gradle")
+  foreach(_gradle IN LISTS _gradle_files)
+    _ghidra_sleigh_options("${_gradle}" _actual_options)
+  endforeach()
+  list(LENGTH _gradle_files _gradle_count)
+  message(STATUS "Parsed ${_gradle_count} real processor Gradle option files")
   set(_reduced_build "${_root}/reduced-build")
   run("${CMAKE_COMMAND}" -Werror=dev -Werror=deprecated
     -S "${SOURCE_DIR}" -B "${_reduced_build}"
