@@ -16,6 +16,7 @@
 #       The archive must define no symbol matching PATTERN.  Used to prove
 #       ghidra_process.cc (GhidraCapability, GhidraCommand) is not linked.
 
+cmake_minimum_required(VERSION 3.24)
 if(NOT MODE)
   message(FATAL_ERROR "NoJvmCheck: MODE is required (linkage|runtime|symbols)")
 endif()
@@ -98,11 +99,7 @@ elseif(MODE STREQUAL "runtime")
       WORKING_DIRECTORY "${WORKDIR}"
       OUTPUT_VARIABLE _out ERROR_VARIABLE _err RESULT_VARIABLE _rc)
   endif()
-  if(ACCEPT_RC AND _rc EQUAL ACCEPT_RC)
-    # The program ran; its output check did not apply (see the program's
-    # own message).  The environment and execve checks below still apply.
-    message(STATUS "NoJvmCheck: ${BINARY} exited ${_rc}: ${_err}")
-  elseif(NOT _rc EQUAL 0)
+  if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "NoJvmCheck: ${BINARY} failed under an empty environment (rc=${_rc})\n${_err}")
   endif()
   if(_out MATCHES "${_jvm_regex}" OR _err MATCHES "${_jvm_regex}")

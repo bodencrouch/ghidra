@@ -62,6 +62,12 @@ set(GHIDRA_DECOMP_SLEIGH_HOME "${CMAKE_CURRENT_BINARY_DIR}/sleigh-home" CACHE PA
   "Root of the generated sleigh home tree (Ghidra/Processors/<P>/data/languages/*.sla)")
 set(GHIDRA_DECOMP_PROCESSORS_ROOT "${GHIDRA_DECOMP_GHIDRA_DIR}/Processors" CACHE PATH
   "Directory holding the processor modules (Ghidra/Processors)")
+set(GHIDRA_DECOMP_SMOKE_SPEC_MISMATCH "AUTO" CACHE STRING
+  "SLEIGH smoke output that differs from its expectation on other specification sources: AUTO (fail on the Ghidra version the expectation was recorded from, skip on other versions), FAIL, or SKIP")
+set_property(CACHE GHIDRA_DECOMP_SMOKE_SPEC_MISMATCH PROPERTY STRINGS AUTO FAIL SKIP)
+if(NOT GHIDRA_DECOMP_SMOKE_SPEC_MISMATCH MATCHES "^(AUTO|FAIL|SKIP)$")
+  message(FATAL_ERROR "GHIDRA_DECOMP_SMOKE_SPEC_MISMATCH must be AUTO, FAIL or SKIP")
+endif()
 set(GHIDRA_DECOMP_SLEIGH_COMPILER "" CACHE FILEPATH
   "SLEIGH compiler that runs on the build host, used for the specifications instead of the one built here (needed when cross-compiling without an emulator)")
 
@@ -113,7 +119,8 @@ include(SleighCompileSpecs)
 
 ghidra_decomp_read_sources("${CMAKE_CURRENT_SOURCE_DIR}/Makefile" "${CMAKE_CURRENT_SOURCE_DIR}")
 if(GHIDRA_DECOMP_CHECK_MANIFEST)
-  ghidra_decomp_check_manifest("${CMAKE_CURRENT_SOURCE_DIR}/Makefile" "${CMAKE_CURRENT_SOURCE_DIR}")
+  ghidra_decomp_check_manifest("${CMAKE_CURRENT_SOURCE_DIR}/Makefile" "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${GHIDRA_DECOMP_CONSOLE}")
 endif()
 
 # zlib is needed only where the sources compress .sla files (11.1 and later).
@@ -135,9 +142,12 @@ endif()
 
 # ---------------------------------------------------------------------------
 # Compile settings shared by every target.  The definitions that change
-# class layouts (__TERMINAL__, CPUI_DEBUG) or header selection (LOCAL_ZLIB)
-# are exported so that consumers see the same layouts.
+# class layouts (__TERMINAL__, CPUI_DEBUG) or header selection (LOCAL_ZLIB,
+# _WINDOWS in types.h) are exported so that consumers see the same layouts.
+# The other platform macros the Gradle build defines are used by no header
+# and stay private.
 set(GHIDRA_DECOMP_PUBLIC_DEFINITIONS)
+set(GHIDRA_DECOMP_PRIVATE_DEFINITIONS)
 if(GHIDRA_DECOMP_TERMINAL)
   list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS __TERMINAL__)
 endif()
@@ -148,11 +158,12 @@ if(_use_local_zlib)
   list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS LOCAL_ZLIB)
 endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS LINUX _LINUX)
+  list(APPEND GHIDRA_DECOMP_PRIVATE_DEFINITIONS LINUX _LINUX)
 elseif(WIN32)
   # filemanage.cc and types.h select their Windows code on _WINDOWS, which
   # the Gradle build defines together with WINDOWS.
-  list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS WINDOWS _WINDOWS)
+  list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS _WINDOWS)
+  list(APPEND GHIDRA_DECOMP_PRIVATE_DEFINITIONS WINDOWS)
 endif()
 
 set(GHIDRA_DECOMP_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/ghidra/decompiler")
@@ -168,7 +179,8 @@ function(_ghidra_decomp_compile_settings target)
   target_compile_options(${target} PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wno-sign-compare>
     $<$<CXX_COMPILER_ID:MSVC>:/EHsc /W3>)
-  target_compile_definitions(${target} PRIVATE ${GHIDRA_DECOMP_PUBLIC_DEFINITIONS})
+  target_compile_definitions(${target} PRIVATE ${GHIDRA_DECOMP_PUBLIC_DEFINITIONS}
+    ${GHIDRA_DECOMP_PRIVATE_DEFINITIONS})
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 endfunction()
 
@@ -216,7 +228,7 @@ endif()
 # Object libraries, one per Makefile source set.
 _ghidra_decomp_object_library(ghidra_core_objs ${GHIDRA_DECOMP_CORE_SOURCES})
 _ghidra_decomp_object_library(ghidra_sleigh_objs ${GHIDRA_DECOMP_SLEIGH_SOURCES})
-# The four DECCORE units that the Makefile's LIBSLA_NAMES also needs.
+# The DECCORE units that the Makefile's LIBSLA_NAMES also names.
 _ghidra_decomp_object_library(ghidra_sladeccore_objs ${GHIDRA_DECOMP_LIBSLA_DECCORE_SOURCES})
 _ghidra_decomp_object_library(ghidra_deccore_objs ${GHIDRA_DECOMP_DECCORE_SOURCES})
 
@@ -323,8 +335,7 @@ if(GHIDRA_DECOMP_SPEC_PROCESSORS)
     PROCESSORS ${GHIDRA_DECOMP_SPEC_PROCESSORS}
     PROCESSORS_ROOT "${GHIDRA_DECOMP_PROCESSORS_ROOT}"
     OUTPUT_DIR "${GHIDRA_DECOMP_SLEIGH_HOME}"
-    COMPILER ${_spec_compiler}
-    OUT_VAR GHIDRA_DECOMP_SLA_FILES)
+    COMPILER ${_spec_compiler})
   set(_have_specs TRUE)
 endif()
 
@@ -372,6 +383,7 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
     COMMAND "${CMAKE_COMMAND}"
       -DMAKEFILE=${CMAKE_CURRENT_SOURCE_DIR}/Makefile
       -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+      -DCONSOLE=${GHIDRA_DECOMP_CONSOLE}
       -P "${_cmake_dir}/CheckMakefileManifest.cmake")
   set_tests_properties(manifest_matches_makefile PROPERTIES LABELS "manifest")
   add_test(NAME manifest_rejects_archive_drift
@@ -498,7 +510,10 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       add_test(NAME decomp_datatests
         COMMAND ghidra_decomp_test -sleighpath "${GHIDRA_DECOMP_SLEIGH_HOME}" -path "${_datatest_dir}" datatests
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
-      set_tests_properties(decomp_datatests PROPERTIES LABELS "data")
+      # The runner's exit status counts failed comparisons only; a file that
+      # fails to load or execute is reported under "Failures:" instead.
+      set_tests_properties(decomp_datatests PROPERTIES LABELS "data"
+        FAIL_REGULAR_EXPRESSION "Failures:")
     endif()
   endif()
 
@@ -519,12 +534,13 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       # sources it was recorded from.  Output that differs on other sources
       # is reported as skipped (77), not as a pass or a failure.
       ghidra_sleigh_spec_fingerprint("${GHIDRA_DECOMP_PROCESSORS_ROOT}/${_processor}/data/languages" _fingerprint)
-      set(_smoke_fingerprint_${_case} "${_fingerprint}")
       file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-fingerprints/${_case}.txt" "${_fingerprint}\n")
       add_test(NAME sleigh_smoke_${_case}
         COMMAND ghidra_sleigh_smoke "${GHIDRA_DECOMP_SLEIGH_HOME}" ${_case}
                 --expect "${_cmake_dir}/smoke/expected/${_case}.txt"
-                --spec-fingerprint "${_fingerprint}")
+                --spec-fingerprint "${_fingerprint}"
+                --ghidra-version "${GHIDRA_DECOMP_GHIDRA_VERSION}"
+                --mismatch "${GHIDRA_DECOMP_SMOKE_SPEC_MISMATCH}")
       set_tests_properties(sleigh_smoke_${_case} PROPERTIES LABELS "smoke" SKIP_RETURN_CODE 77)
     endforeach()
   endif()
@@ -548,6 +564,7 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
     set_tests_properties(no_jvm_linkage PROPERTIES LABELS "isolation")
     add_test(NAME no_jvm_guard
       COMMAND "${CMAKE_COMMAND}" "-DBINARY=$<TARGET_FILE:ghidra_decomp_smoke>"
+              "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/no-jvm-guard"
               -P "${_cmake_dir}/TestNoJvmCheck.cmake")
     set_tests_properties(no_jvm_guard PROPERTIES LABELS "isolation")
 
@@ -560,8 +577,7 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       add_test(NAME no_jvm_runtime
         COMMAND "${CMAKE_COMMAND}" -DMODE=runtime
                 "-DBINARY=$<TARGET_FILE:ghidra_sleigh_smoke>"
-                "-DARGS=${GHIDRA_DECOMP_SLEIGH_HOME}$<SEMICOLON>x86-64$<SEMICOLON>--expect$<SEMICOLON>${_cmake_dir}/smoke/expected/x86-64.txt$<SEMICOLON>--spec-fingerprint$<SEMICOLON>${_smoke_fingerprint_x86-64}"
-                -DACCEPT_RC=77
+                "-DARGS=${GHIDRA_DECOMP_SLEIGH_HOME}$<SEMICOLON>x86-64"
                 "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}"
                 ${_strace_arg}
                 -P "${_cmake_dir}/NoJvmCheck.cmake")

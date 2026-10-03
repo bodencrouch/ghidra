@@ -17,8 +17,9 @@
 // instructions with a compiled .sla file, print one deterministic text block
 // and optionally compare it with an expected file.
 //
-//   sleigh_smoke <sleigh-home> <case> [--expect <file> [--spec-fingerprint <sha256>]]
-//   sleigh_smoke <sleigh-home> <case> --record <sha256>
+//   sleigh_smoke <sleigh-home> <case> [--expect <file> [--spec-fingerprint <sha256>]
+//                [--ghidra-version <version>] [--mismatch auto|fail|skip]]
+//   sleigh_smoke <sleigh-home> <case> --record <sha256> [--ghidra-version <version>]
 //   sleigh_smoke --self-test
 //
 // <sleigh-home> is the root that holds Ghidra/Processors/<P>/data/languages.
@@ -36,12 +37,14 @@
 // group and its size (see canonicalTemporaries).  --self-test checks that
 // this renaming accepts moved temporaries and rejects any other change.
 //
-// An expected file starts with "# specification sources sha256: <hash>",
-// the fingerprint of the .slaspec/.sinc files it was recorded from (--record
-// writes it).  When the output differs and --spec-fingerprint names other
-// sources, the expectation does not apply to them: the program says so and
-// exits 77, which the test registers as skipped.  When the sources are the
-// same, any difference is a failure.
+// An expected file starts with "# specification sources sha256: <hash>" and
+// "# ghidra version: <version>": the fingerprint of the .slaspec/.sinc files
+// and the Ghidra version it was recorded from (--record writes both).  Any
+// difference fails when the sources have the recorded fingerprint.  When they
+// do not, --mismatch decides: fail, skip (exit 77, which the test registers
+// as skipped), or auto, which fails on the recorded Ghidra version (an edited
+// specification needs its expectation recorded again) and skips on other
+// versions, whose specifications the expectation does not describe.
 //
 // The program mirrors sleighexample.cc: an in-memory LoadImage, a
 // ContextInternal, a Sleigh translator initialized from a DocumentStorage,
@@ -51,6 +54,7 @@
 #include "sleigh.hh"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -269,10 +273,7 @@ string canonicalTemporaries(const string &text)
     use.end = close + 1;
     use.offset = strtoull(text.substr(pos + prefix.size(),colon - pos - prefix.size()).c_str(),(char **)0,16);
     use.sizetext = text.substr(colon + 1,close - colon - 1);
-    string sizehex = use.sizetext;
-    if (sizehex.compare(0,2,"0x") == 0)
-      sizehex = sizehex.substr(2);
-    use.size = strtoull(sizehex.c_str(),(char **)0,16);
+    use.size = strtoull(use.sizetext.c_str(),(char **)0,10);	// PcodePrinter writes sizes in decimal
     uses.push_back(use);
     pos = use.end;
   }
@@ -316,7 +317,7 @@ string canonicalTemporaries(const string &text)
 }
 
 int judge(const string &produced,const string &expectedtext,const string &fingerprint,
-	  const string &label,bool quiet);
+	  const string &version,const string &mismatch,const string &label,bool quiet);
 
 /// The renaming must accept a pure move of the temporaries and reject any
 /// change to their identity, size or overlaps; the result must be skipped
@@ -344,6 +345,9 @@ int selfTest(void)
     { "split identity is rejected",
       "unique[0x100:4] = COPY r\nr = COPY unique[0x100:4]\n",
       "unique[0x100:4] = COPY r\nr = COPY unique[0x200:4]\n", false },
+    { "sizes are read in decimal",
+      "unique[0x100:16] = COPY r\nunique[0x10a:4] = COPY r\n",
+      "unique[0x100:16] = COPY r\nunique[0x200:4] = COPY r\n", false },
     { "other spaces are compared exactly",
       "register[0x20:8] = COPY unique[0x100:8]\n",
       "register[0x28:8] = COPY unique[0x100:8]\n", false },
@@ -356,22 +360,30 @@ int selfTest(void)
     if (!ok)
       failures += 1;
   }
-  struct Decision { const char *name; const char *produced; const char *expected; const char *fingerprint; int result; };
+  struct Decision { const char *name; const char *produced; const char *fingerprint; const char *version; const char *mismatch; int result; };
+  static const char *recorded = "# specification sources sha256: AA\n# ghidra version: 12.3\na\n";
   static const Decision decisions[] = {
-    { "a match passes on the recorded sources", "a\n", "# specification sources sha256: AA\na\n", "AA", 0 },
-    { "a match passes on other sources", "a\n", "# specification sources sha256: AA\na\n", "BB", 0 },
-    { "a difference fails on the recorded sources", "b\n", "# specification sources sha256: AA\na\n", "AA", 1 },
-    { "a difference is skipped on other sources", "b\n", "# specification sources sha256: AA\na\n", "BB", 77 },
-    { "a difference fails without a recorded fingerprint", "b\n", "a\n", "BB", 1 },
-    { "a difference fails without a given fingerprint", "b\n", "# specification sources sha256: AA\na\n", "", 1 },
+    { "a match passes on the recorded sources", "a\n", "AA", "12.3", "auto", 0 },
+    { "a match passes on other sources", "a\n", "BB", "11.0", "fail", 0 },
+    { "a difference fails on the recorded sources", "b\n", "AA", "11.0", "skip", 1 },
+    { "auto: a difference fails on edited sources of the recorded version", "b\n", "BB", "12.3", "auto", 1 },
+    { "auto: a difference is skipped on another version", "b\n", "BB", "11.0", "auto", 77 },
+    { "skip: a difference is skipped on other sources", "b\n", "BB", "12.3", "skip", 77 },
+    { "fail: a difference fails on other sources", "b\n", "BB", "11.0", "fail", 1 },
+    { "a difference fails without a given fingerprint", "b\n", "", "11.0", "skip", 1 },
   };
   for(size_t i=0;i<sizeof(decisions)/sizeof(decisions[0]);++i) {
-    int result = judge(decisions[i].produced,decisions[i].expected,decisions[i].fingerprint,"self-test",true);
+    int result = judge(decisions[i].produced,recorded,decisions[i].fingerprint,decisions[i].version,
+		       decisions[i].mismatch,"self-test",true);
     bool ok = (result == decisions[i].result);
     cerr << (ok ? "ok: " : "FAILED: ") << decisions[i].name << endl;
     if (!ok)
       failures += 1;
   }
+  bool unrecorded = (judge("b\n","a\n","BB","11.0","skip","self-test",true) == 1);
+  cerr << (unrecorded ? "ok: " : "FAILED: ") << "a difference fails without a recorded fingerprint" << endl;
+  if (!unrecorded)
+    failures += 1;
   return failures == 0 ? 0 : 1;
 }
 
@@ -398,30 +410,34 @@ void reportFirstDifference(const string &produced,const string &expected)
 }
 
 /// Split an expected file into its "# ..." header and the expected output.
-string stripHeader(const string &text,string &recorded)
+string stripHeader(const string &text,string &recorded,string &recordedversion)
 
 {
   static const string key = "# specification sources sha256: ";
+  static const string versionkey = "# ghidra version: ";
   recorded.clear();
+  recordedversion.clear();
   string::size_type pos = 0;
   while(pos < text.size() && text[pos] == '#') {
     string::size_type eol = text.find('\n',pos);
     string line = text.substr(pos,(eol == string::npos) ? string::npos : eol - pos);
     if (line.compare(0,key.size(),key) == 0)
       recorded = line.substr(key.size());
+    else if (line.compare(0,versionkey.size(),versionkey) == 0)
+      recordedversion = line.substr(versionkey.size());
     pos = (eol == string::npos) ? text.size() : eol + 1;
   }
   return text.substr(pos);
 }
 
-/// 0: matches, 1: differs, 77: differs and the expectation was recorded
-/// from other specification sources, so it does not apply.
+/// 0: matches, 1: differs, 77: differs on specification sources the
+/// expectation was not recorded from, and the mismatch policy says skip.
 int judge(const string &produced,const string &expectedtext,const string &fingerprint,
-	  const string &label,bool quiet)
+	  const string &version,const string &mismatch,const string &label,bool quiet)
 
 {
-  string recorded;
-  string expected = stripHeader(expectedtext,recorded);
+  string recorded,recordedversion;
+  string expected = stripHeader(expectedtext,recorded,recordedversion);
   if (expected == produced) {
     if (!quiet) cerr << label << ": output matches" << endl;
     return 0;
@@ -432,7 +448,15 @@ int judge(const string &produced,const string &expectedtext,const string &finger
     if (!quiet) cerr << label << ": output matches except for where temporaries are allocated" << endl;
     return 0;
   }
-  if (!recorded.empty() && !fingerprint.empty() && recorded != fingerprint) {
+  bool othersources = (!recorded.empty() && !fingerprint.empty() && recorded != fingerprint);
+  bool skip = false;
+  if (othersources) {
+    if (mismatch == "skip")
+      skip = true;
+    else if (mismatch == "auto")
+      skip = recordedversion.empty() || version.empty() || recordedversion != version;
+  }
+  if (skip) {
     if (!quiet) {
       cerr << label << ": output differs, and these specification sources (sha256 " << fingerprint
 	   << ") are not the ones the expected output was recorded from (sha256 " << recorded
@@ -443,6 +467,9 @@ int judge(const string &produced,const string &expectedtext,const string &finger
   }
   if (!quiet) {
     cerr << label << ": output differs" << endl;
+    if (othersources)
+      cerr << "The specification sources (sha256 " << fingerprint << ") changed since the expectation was recorded"
+	   << " on this Ghidra version (" << recordedversion << ").  Review the output, then record it again." << endl;
     cerr << "with temporaries renamed by overlapping group:" << endl;
     reportFirstDifference(canonproduced,canonexpected);
   }
@@ -452,8 +479,9 @@ int judge(const string &produced,const string &expectedtext,const string &finger
 int usage(const char *prog)
 
 {
-  cerr << "USAGE: " << prog << " <sleigh-home> <case> [--expect <file> [--spec-fingerprint <sha256>]]" << endl;
-  cerr << "       " << prog << " <sleigh-home> <case> --record <sha256>" << endl;
+  cerr << "USAGE: " << prog << " <sleigh-home> <case> [--expect <file> [--spec-fingerprint <sha256>]" << endl;
+  cerr << "         [--ghidra-version <version>] [--mismatch auto|fail|skip]]" << endl;
+  cerr << "       " << prog << " <sleigh-home> <case> --record <sha256> [--ghidra-version <version>]" << endl;
   cerr << "       " << prog << " --self-test" << endl;
   cerr << "cases:";
   for(int4 i=0;i<numCases;++i)
@@ -477,7 +505,8 @@ int main(int argc,char **argv)
     return usage(argv[0]);
   string sleighhome(argv[1]);
   string casename(argv[2]);
-  string expectfile,fingerprint,recordfingerprint;
+  string expectfile,fingerprint,recordfingerprint,version;
+  string mismatch = "auto";
   for(int i=3;i+1<argc;i+=2) {
     if (strcmp(argv[i],"--expect") == 0)
       expectfile = argv[i+1];
@@ -485,6 +514,16 @@ int main(int argc,char **argv)
       fingerprint = argv[i+1];
     else if (strcmp(argv[i],"--record") == 0)
       recordfingerprint = argv[i+1];
+    else if (strcmp(argv[i],"--ghidra-version") == 0)
+      version = argv[i+1];
+    else if (strcmp(argv[i],"--mismatch") == 0) {
+      string m = argv[i+1];
+      for(string::size_type j=0;j<m.size();++j)
+	m[j] = (char)tolower((unsigned char)m[j]);
+      if (m != "auto" && m != "fail" && m != "skip")
+	return usage(argv[0]);
+      mismatch = m;
+    }
     else
       return usage(argv[0]);
   }
@@ -505,8 +544,11 @@ int main(int argc,char **argv)
     return 1;
   }
   string produced = out.str();
-  if (!recordfingerprint.empty())
+  if (!recordfingerprint.empty()) {
     cout << "# specification sources sha256: " << recordfingerprint << '\n';
+    if (!version.empty())
+      cout << "# ghidra version: " << version << '\n';
+  }
   cout << produced;
   cout.flush();
 
@@ -520,5 +562,5 @@ int main(int argc,char **argv)
   }
   ostringstream expected;
   expected << in.rdbuf();
-  return judge(produced,expected.str(),fingerprint,casename + " vs " + expectfile,false);
+  return judge(produced,expected.str(),fingerprint,version,mismatch,casename + " vs " + expectfile,false);
 }

@@ -69,14 +69,12 @@ function(ghidra_sleigh_compile_specs)
   if(NOT ARG_COMPILER)
     set(ARG_COMPILER ghidra_sleigh_compiler)
   endif()
+  # A target name as the command lets CMake substitute its path and, when
+  # cross-compiling, prepend CROSSCOMPILING_EMULATOR; a path runs as given.
+  set(_compiler_cmd "${ARG_COMPILER}")
+  set(_compiler_dep "")
   if(TARGET "${ARG_COMPILER}")
-    # Name the executable target itself so that CMake substitutes its path
-    # and, when cross-compiling, prepends CROSSCOMPILING_EMULATOR.
-    set(_compiler_cmd "${ARG_COMPILER}")
     set(_compiler_dep "${ARG_COMPILER}")
-  else()
-    set(_compiler_cmd "${ARG_COMPILER}")
-    set(_compiler_dep "")
   endif()
 
   get_property(_pools GLOBAL PROPERTY JOB_POOLS)
@@ -105,7 +103,12 @@ function(ghidra_sleigh_compile_specs)
       file(READ "${_gradle}" _gradle_text)
       string(REGEX MATCH "sleighCompileOptions[ \t]*=[ \t]*\\[([^]]*)\\]" _m "${_gradle_text}")
       if(_m)
-        string(REGEX MATCHALL "[\"']([^\"']*)[\"']" _quoted "${CMAKE_MATCH_1}")
+        # Groovy comments inside the list are not options (Atmel keeps
+        # "// '-l'" there).
+        set(_block "${CMAKE_MATCH_1}")
+        string(REGEX REPLACE "/\\*([^*]|\\*+[^*/])*\\*+/" "" _block "${_block}")
+        string(REGEX REPLACE "//[^\n]*" "" _block "${_block}")
+        string(REGEX MATCHALL "[\"']([^\"']*)[\"']" _quoted "${_block}")
         foreach(_q IN LISTS _quoted)
           string(REGEX REPLACE "^[\"']|[\"']$" "" _q "${_q}")
           list(APPEND _options "${_q}")

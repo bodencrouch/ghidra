@@ -1,4 +1,5 @@
 # specification sources sha256: fa9ff78e641ee174fea1df30e425c15ff9940db690d780c5c9a8a8fc8ce6b51b
+# ghidra version: 12.3
 0x8000 push {r4,r5,r6,lr}
   register[0x80:4] = COPY register[0x54:4]
   register[0x80:4] = INT_SUB register[0x80:4] const[0x4:4]

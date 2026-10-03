@@ -1,4 +1,5 @@
 # specification sources sha256: 0909849dbe1cf007c3a55e1d0d6f21ca8b910c301d9aa220c10faa38f436a47f
+# ghidra version: 12.3
 0x401000 PUSH RBP
   unique[0x4f900:8] = COPY register[0x28:8]
   register[0x20:8] = INT_SUB register[0x20:8] const[0x8:8]

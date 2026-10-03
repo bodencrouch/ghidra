@@ -1,6 +1,6 @@
 # Module-default and incremental ownership regression; cmake -E copy stands in
 # for SLEIGH.
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 if(NOT MODULE OR NOT SOURCE_DIR OR NOT TEST_ROOT)
   message(FATAL_ERROR "MODULE, SOURCE_DIR and TEST_ROOT are required")
 endif()

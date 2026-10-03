@@ -132,7 +132,14 @@ function(ghidra_decomp_read_sources makefile source_dir)
   # extension sources (coreext_*, ghidraext_*, consoleext_*) are ignored by
   # ../.gitignore and reach the Makefile only through its *EXT_NAMES
   # variables, so they are left out.
-  file(GLOB _all_cc RELATIVE "${source_dir}" "${source_dir}/*.cc")
+  if(CMAKE_SCRIPT_MODE_FILE)
+    file(GLOB _all_cc RELATIVE "${source_dir}" "${source_dir}/*.cc")
+  else()
+    # A source added to or removed from the directory or the Makefile must
+    # reconfigure the build; otherwise the archives keep the old unit list.
+    file(GLOB _all_cc CONFIGURE_DEPENDS RELATIVE "${source_dir}" "${source_dir}/*.cc")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${makefile}")
+  endif()
   list(SORT _all_cc)
   list(FILTER _all_cc EXCLUDE REGEX "^(coreext|ghidraext|consoleext)_")
   set(_all_names)

@@ -1,7 +1,7 @@
 # Consistency checks for the source lists read from the Makefile.
 #
 # Usage (script mode):
-#   cmake -DMAKEFILE=<path to Makefile> [-DSOURCE_DIR=<cpp dir>]
+#   cmake -DMAKEFILE=<path to Makefile> [-DSOURCE_DIR=<cpp dir>] [-DCONSOLE=OFF]
 #         [-DGRADLE=<path to buildNatives.gradle> [-DGRADLE_STRICT=ON]]
 #         -P CheckMakefileManifest.cmake
 #
@@ -9,7 +9,9 @@
 # with ghidra_decomp_read_sources() (GhidraDecompSources.cmake) and checks
 # that the two archives this build makes have exactly the members of the
 # Makefile's LIBSLA_NAMES and LIBDECOMP_NAMES (the latter without the BFD
-# loader, which this build omits).  A mismatch is a configure error.
+# loader, which this build omits, and without the console units when the
+# build is configured with GHIDRA_DECOMP_CONSOLE=OFF).  A mismatch is a
+# configure error.
 #
 # ghidra_decomp_check_gradle(<buildNatives.gradle> <makefile> <source dir>
 # <strict>) compares the sources Gradle compiles into its decompile and
@@ -18,6 +20,12 @@
 # used only by the console) is a deliberate omission, not a difference.  It
 # reports both directions and fails only when <strict> is true, because a
 # difference there is between two upstream files, not in this build.
+
+if(CMAKE_SCRIPT_MODE_FILE STREQUAL CMAKE_CURRENT_LIST_FILE)
+  # Script mode starts with no policies set; the checks rely on 3.24 behavior
+  # (if(IN_LIST), list() keeping empty elements).
+  cmake_minimum_required(VERSION 3.24)
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/GhidraDecompSources.cmake")
 
@@ -68,7 +76,13 @@ function(_ghidra_decomp_compare_set name list_a label_a list_b label_b mode resu
   set(${result_var} ${_ok} PARENT_SCOPE)
 endfunction()
 
+# ghidra_decomp_check_manifest(<makefile> <source dir> [<console>])
+# <console> defaults to ON; OFF checks the archive built without the console.
 function(ghidra_decomp_check_manifest makefile source_dir)
+  set(_console ON)
+  if(ARGC GREATER 2)
+    set(_console "${ARGV2}")
+  endif()
   ghidra_decomp_read_sources("${makefile}" "${source_dir}")
   foreach(_set CORE DECCORE_ALL SLEIGH GHIDRA SLACOMP SPECIAL EXTRA_BASE EXTRA_CONSOLE
                EXTRA_BFD EXTRA_BFD_CONSOLE)
@@ -80,13 +94,20 @@ function(ghidra_decomp_check_manifest makefile source_dir)
   set(_all_ok TRUE)
   foreach(_library LIBSLA LIBDECOMP)
     _ghidra_decomp_expand_names("${_text}" ${_library}_NAMES _members)
+    set(_cmake ${GHIDRA_DECOMP_${_library}_SOURCES})
     if(_library STREQUAL "LIBDECOMP")
-      # This build omits the optional BFD loader.
-      set(_bfd ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES} ${GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES})
-      _ghidra_decomp_subtract("${_members}" "${_bfd}" _members)
+      # This build omits the optional BFD loader, and the console units when
+      # it is configured without the console.
+      set(_omit ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES} ${GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES})
+      if(NOT _console)
+        list(APPEND _omit ${GHIDRA_DECOMP_EXTRA_CONSOLE_SOURCES})
+        _ghidra_decomp_subtract("${_cmake}" "${GHIDRA_DECOMP_EXTRA_CONSOLE_SOURCES}" _cmake)
+      endif()
+      _ghidra_decomp_subtract("${_members}" "${_omit}" _members)
+      string(REPLACE ";" " " _s "${_omit}")
+      message(STATUS "manifest check: LIBDECOMP_NAMES: deliberately omitted: ${_s}")
     endif()
     # Each member must be compiled exactly once.
-    set(_cmake ${GHIDRA_DECOMP_${_library}_SOURCES})
     set(_dedup ${_cmake})
     list(REMOVE_DUPLICATES _dedup)
     list(LENGTH _cmake _n1)
@@ -189,9 +210,12 @@ if(CMAKE_SCRIPT_MODE_FILE AND CMAKE_SCRIPT_MODE_FILE STREQUAL CMAKE_CURRENT_LIST
   if(NOT SOURCE_DIR)
     get_filename_component(SOURCE_DIR "${MAKEFILE}" DIRECTORY)
   endif()
+  if(NOT DEFINED CONSOLE)
+    set(CONSOLE ON)
+  endif()
   if(GRADLE)
     ghidra_decomp_check_gradle("${GRADLE}" "${MAKEFILE}" "${SOURCE_DIR}" "${GRADLE_STRICT}")
   else()
-    ghidra_decomp_check_manifest("${MAKEFILE}" "${SOURCE_DIR}")
+    ghidra_decomp_check_manifest("${MAKEFILE}" "${SOURCE_DIR}" "${CONSOLE}")
   endif()
 endif()
