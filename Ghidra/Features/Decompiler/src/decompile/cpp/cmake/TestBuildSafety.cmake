@@ -3,6 +3,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/BuildSafety.cmake")
 if(MODE STREQUAL "stage")
   ghidra_decomp_stage_datatests("${DIRECTORY}" ${SELECTED})
   return()
+elseif(MODE STREQUAL "overlap")
+  ghidra_decomp_reject_overlap("${DIRECTORY}" "${PROTECTED_SOURCE}")
+  file(WRITE "${DIRECTORY}/candidate-owned.txt" "guard allowed a write\n")
+  return()
 endif()
 if(NOT SOURCE_DIR OR NOT TEST_ROOT)
   message(FATAL_ERROR "SOURCE_DIR and TEST_ROOT are required")
@@ -10,7 +14,7 @@ endif()
 string(RANDOM LENGTH 10 ALPHABET 0123456789abcdef id)
 set(root "${TEST_ROOT}/build-safety-${id}")
 file(MAKE_DIRECTORY "${root}")
-foreach(case same child sibling ancestor alias alias-child home-alias home-ancestor processor data-alias)
+foreach(case same child sibling ancestor alias alias-child home-alias home-alias-parent home-ancestor processor data-alias)
   set(fixture "${root}/${case}")
   set(source "${fixture}/decompile/cpp")
   file(MAKE_DIRECTORY "${source}/cmake" "${fixture}/decompile/datatests" "${fixture}/processors")
@@ -37,6 +41,9 @@ foreach(case same child sibling ancestor alias alias-child home-alias home-ances
   elseif(case STREQUAL "home-alias")
     file(CREATE_LINK "${fixture}/decompile/datatests" "${fixture}/alias" SYMBOLIC)
     set(home "${fixture}/alias")
+  elseif(case STREQUAL "home-alias-parent")
+    file(CREATE_LINK "${source}" "${fixture}/alias" SYMBOLIC)
+    set(home "${fixture}/alias/../datatests")
   elseif(case STREQUAL "home-ancestor")
     set(home "${fixture}")
   elseif(case STREQUAL "processor")
@@ -64,6 +71,63 @@ foreach(case same child sibling ancestor alias alias-child home-alias home-ances
   # CMake may have created CMakeCache.txt/CMakeFiles before our guard ran.
   # They remain visible in this disposable fixture until final cleanup.
 endforeach()
+
+# Resolve the link before '..', including missing descendants and relative
+# input. The negative child writes through the identical raw path if the
+# guard mistakenly accepts it, reproducing the reviewed bypass directly.
+set(fixture "${root}/parent-traversal")
+set(protected "${fixture}/actual/source")
+file(MAKE_DIRECTORY "${fixture}/actual/child" "${protected}")
+file(CREATE_LINK "${fixture}/actual/child" "${fixture}/alias" SYMBOLIC)
+file(WRITE "${protected}/user.xml" "protected source sentinel\n")
+foreach(path "${fixture}/alias/../source" "${fixture}/alias/../source/new"
+    "alias/../source" "${fixture}/alias/./../source")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -DMODE=overlap
+    "-DDIRECTORY=${path}" "-DPROTECTED_SOURCE=${protected}" -P "${CMAKE_CURRENT_LIST_FILE}"
+    WORKING_DIRECTORY "${fixture}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(result EQUAL 0 OR NOT error MATCHES "build safety: source/output overlap")
+    message(FATAL_ERROR "Symlink parent traversal accepted: ${path}: ${output}${error}")
+  endif()
+  file(READ "${protected}/user.xml" sentinel)
+  file(GLOB_RECURSE contents RELATIVE "${protected}" "${protected}/*")
+  if(NOT sentinel STREQUAL "protected source sentinel\n" OR NOT contents STREQUAL "user.xml")
+    message(FATAL_ERROR "Symlink parent traversal changed the original source fixture")
+  endif()
+endforeach()
+foreach(mode overlap stage)
+  execute_process(COMMAND "${CMAKE_COMMAND}" "-DMODE=${mode}"
+    "-DDIRECTORY=${fixture}/alias/../source" "-DPROTECTED_SOURCE=${protected}"
+    -P "${CMAKE_CURRENT_LIST_FILE}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(result EQUAL 0 OR NOT error MATCHES "(source/output overlap|data staging: symlink redirects)")
+    message(FATAL_ERROR "Raw parent traversal ${mode} was not rejected: ${output}${error}")
+  endif()
+endforeach()
+execute_process(COMMAND "${CMAKE_COMMAND}" -DMODE=overlap
+  "-DDIRECTORY=${fixture}/missing/../actual/source" "-DPROTECTED_SOURCE=${protected}"
+  -P "${CMAKE_CURRENT_LIST_FILE}"
+  RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+if(result EQUAL 0 OR NOT error MATCHES "build safety: ambiguous traversal")
+  message(FATAL_ERROR "Ambiguous missing-prefix traversal accepted: ${output}${error}")
+endif()
+# Benign traversal through an existing ordinary directory still works.
+ghidra_decomp_real_path("${fixture}/actual/child/../source" resolved)
+if(NOT resolved STREQUAL protected)
+  message(FATAL_ERROR "Ordinary parent traversal changed: ${resolved}")
+endif()
+foreach(path "${fixture}/fresh-output/deep" "${fixture}/alias/new/deep")
+  ghidra_decomp_real_path("${path}" resolved)
+  string(REPLACE "${fixture}/alias/" "${fixture}/actual/child/" expected "${path}")
+  if(NOT resolved STREQUAL expected OR EXISTS "${resolved}")
+    message(FATAL_ERROR "Valid nonexistent descendant rejected or created: ${path}: ${resolved}")
+  endif()
+endforeach()
+file(READ "${protected}/user.xml" sentinel)
+file(GLOB_RECURSE contents RELATIVE "${protected}" "${protected}/*")
+if(NOT sentinel STREQUAL "protected source sentinel\n" OR NOT contents STREQUAL "user.xml")
+  message(FATAL_ERROR "Parent-traversal probes changed the original source fixture")
+endif()
 
 set(stage "${root}/stage")
 file(WRITE "${root}/one.xml" "one\n")
