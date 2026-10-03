@@ -17,7 +17,8 @@
 // instructions with a compiled .sla file, print one deterministic text block
 // and optionally compare it with an expected file.
 //
-//   sleigh_smoke <sleigh-home> <case> [--expect <file>]
+//   sleigh_smoke <sleigh-home> <case> [--expect <file> [--spec-fingerprint <sha256>]]
+//   sleigh_smoke <sleigh-home> <case> --record <sha256>
 //   sleigh_smoke --self-test
 //
 // <sleigh-home> is the root that holds Ghidra/Processors/<P>/data/languages.
@@ -34,6 +35,13 @@
 // varnodes are renamed by first use, keeping each one's offset within its
 // group and its size (see canonicalTemporaries).  --self-test checks that
 // this renaming accepts moved temporaries and rejects any other change.
+//
+// An expected file starts with "# specification sources sha256: <hash>",
+// the fingerprint of the .slaspec/.sinc files it was recorded from (--record
+// writes it).  When the output differs and --spec-fingerprint names other
+// sources, the expectation does not apply to them: the program says so and
+// exits 77, which the test registers as skipped.  When the sources are the
+// same, any difference is a failure.
 //
 // The program mirrors sleighexample.cc: an in-memory LoadImage, a
 // ContextInternal, a Sleigh translator initialized from a DocumentStorage,
@@ -307,8 +315,12 @@ string canonicalTemporaries(const string &text)
   return result;
 }
 
+int judge(const string &produced,const string &expectedtext,const string &fingerprint,
+	  const string &label,bool quiet);
+
 /// The renaming must accept a pure move of the temporaries and reject any
-/// change to their identity, size or overlaps.
+/// change to their identity, size or overlaps; the result must be skipped
+/// only when the output differs and the specification sources differ.
 int selfTest(void)
 
 {
@@ -344,6 +356,22 @@ int selfTest(void)
     if (!ok)
       failures += 1;
   }
+  struct Decision { const char *name; const char *produced; const char *expected; const char *fingerprint; int result; };
+  static const Decision decisions[] = {
+    { "a match passes on the recorded sources", "a\n", "# specification sources sha256: AA\na\n", "AA", 0 },
+    { "a match passes on other sources", "a\n", "# specification sources sha256: AA\na\n", "BB", 0 },
+    { "a difference fails on the recorded sources", "b\n", "# specification sources sha256: AA\na\n", "AA", 1 },
+    { "a difference is skipped on other sources", "b\n", "# specification sources sha256: AA\na\n", "BB", 77 },
+    { "a difference fails without a recorded fingerprint", "b\n", "a\n", "BB", 1 },
+    { "a difference fails without a given fingerprint", "b\n", "# specification sources sha256: AA\na\n", "", 1 },
+  };
+  for(size_t i=0;i<sizeof(decisions)/sizeof(decisions[0]);++i) {
+    int result = judge(decisions[i].produced,decisions[i].expected,decisions[i].fingerprint,"self-test",true);
+    bool ok = (result == decisions[i].result);
+    cerr << (ok ? "ok: " : "FAILED: ") << decisions[i].name << endl;
+    if (!ok)
+      failures += 1;
+  }
   return failures == 0 ? 0 : 1;
 }
 
@@ -369,10 +397,63 @@ void reportFirstDifference(const string &produced,const string &expected)
   }
 }
 
+/// Split an expected file into its "# ..." header and the expected output.
+string stripHeader(const string &text,string &recorded)
+
+{
+  static const string key = "# specification sources sha256: ";
+  recorded.clear();
+  string::size_type pos = 0;
+  while(pos < text.size() && text[pos] == '#') {
+    string::size_type eol = text.find('\n',pos);
+    string line = text.substr(pos,(eol == string::npos) ? string::npos : eol - pos);
+    if (line.compare(0,key.size(),key) == 0)
+      recorded = line.substr(key.size());
+    pos = (eol == string::npos) ? text.size() : eol + 1;
+  }
+  return text.substr(pos);
+}
+
+/// 0: matches, 1: differs, 77: differs and the expectation was recorded
+/// from other specification sources, so it does not apply.
+int judge(const string &produced,const string &expectedtext,const string &fingerprint,
+	  const string &label,bool quiet)
+
+{
+  string recorded;
+  string expected = stripHeader(expectedtext,recorded);
+  if (expected == produced) {
+    if (!quiet) cerr << label << ": output matches" << endl;
+    return 0;
+  }
+  string canonproduced = canonicalTemporaries(produced);
+  string canonexpected = canonicalTemporaries(expected);
+  if (canonproduced == canonexpected) {
+    if (!quiet) cerr << label << ": output matches except for where temporaries are allocated" << endl;
+    return 0;
+  }
+  if (!recorded.empty() && !fingerprint.empty() && recorded != fingerprint) {
+    if (!quiet) {
+      cerr << label << ": output differs, and these specification sources (sha256 " << fingerprint
+	   << ") are not the ones the expected output was recorded from (sha256 " << recorded
+	   << "), so the expectation does not apply.  Review the output before recording it again." << endl;
+      reportFirstDifference(canonproduced,canonexpected);
+    }
+    return 77;
+  }
+  if (!quiet) {
+    cerr << label << ": output differs" << endl;
+    cerr << "with temporaries renamed by overlapping group:" << endl;
+    reportFirstDifference(canonproduced,canonexpected);
+  }
+  return 1;
+}
+
 int usage(const char *prog)
 
 {
-  cerr << "USAGE: " << prog << " <sleigh-home> <case> [--expect <file>]" << endl;
+  cerr << "USAGE: " << prog << " <sleigh-home> <case> [--expect <file> [--spec-fingerprint <sha256>]]" << endl;
+  cerr << "       " << prog << " <sleigh-home> <case> --record <sha256>" << endl;
   cerr << "       " << prog << " --self-test" << endl;
   cerr << "cases:";
   for(int4 i=0;i<numCases;++i)
@@ -392,15 +473,20 @@ int main(int argc,char **argv)
 
   if (argc == 2 && strcmp(argv[1],"--self-test") == 0)
     return selfTest();
-  if (argc != 3 && argc != 5)
+  if (argc < 3 || (argc % 2) == 0)
     return usage(argv[0]);
   string sleighhome(argv[1]);
   string casename(argv[2]);
-  string expectfile;
-  if (argc == 5) {
-    if (strcmp(argv[3],"--expect") != 0)
+  string expectfile,fingerprint,recordfingerprint;
+  for(int i=3;i+1<argc;i+=2) {
+    if (strcmp(argv[i],"--expect") == 0)
+      expectfile = argv[i+1];
+    else if (strcmp(argv[i],"--spec-fingerprint") == 0)
+      fingerprint = argv[i+1];
+    else if (strcmp(argv[i],"--record") == 0)
+      recordfingerprint = argv[i+1];
+    else
       return usage(argv[0]);
-    expectfile = argv[4];
   }
   const SmokeCase *sc = findCase(casename);
   if (sc == (const SmokeCase *)0) {
@@ -419,6 +505,8 @@ int main(int argc,char **argv)
     return 1;
   }
   string produced = out.str();
+  if (!recordfingerprint.empty())
+    cout << "# specification sources sha256: " << recordfingerprint << '\n';
   cout << produced;
   cout.flush();
 
@@ -432,19 +520,5 @@ int main(int argc,char **argv)
   }
   ostringstream expected;
   expected << in.rdbuf();
-  if (expected.str() == produced) {
-    cerr << casename << ": output matches " << expectfile << endl;
-    return 0;
-  }
-  string canonproduced = canonicalTemporaries(produced);
-  string canonexpected = canonicalTemporaries(expected.str());
-  if (canonproduced == canonexpected) {
-    cerr << casename << ": output matches " << expectfile
-         << " except for where temporaries are allocated" << endl;
-    return 0;
-  }
-  cerr << casename << ": output differs from " << expectfile << endl;
-  cerr << "with temporaries renamed by overlapping group:" << endl;
-  reportFirstDifference(canonproduced,canonexpected);
-  return 1;
+  return judge(produced,expected.str(),fingerprint,casename + " vs " + expectfile,false);
 }

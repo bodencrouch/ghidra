@@ -515,10 +515,17 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       if(NOT _processor IN_LIST GHIDRA_DECOMP_SPEC_PROCESSORS)
         continue()
       endif()
+      # The expected output names the fingerprint of the specification
+      # sources it was recorded from.  Output that differs on other sources
+      # is reported as skipped (77), not as a pass or a failure.
+      ghidra_sleigh_spec_fingerprint("${GHIDRA_DECOMP_PROCESSORS_ROOT}/${_processor}/data/languages" _fingerprint)
+      set(_smoke_fingerprint_${_case} "${_fingerprint}")
+      file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/smoke-fingerprints/${_case}.txt" "${_fingerprint}\n")
       add_test(NAME sleigh_smoke_${_case}
         COMMAND ghidra_sleigh_smoke "${GHIDRA_DECOMP_SLEIGH_HOME}" ${_case}
-                --expect "${_cmake_dir}/smoke/expected/${_case}.txt")
-      set_tests_properties(sleigh_smoke_${_case} PROPERTIES LABELS "smoke")
+                --expect "${_cmake_dir}/smoke/expected/${_case}.txt"
+                --spec-fingerprint "${_fingerprint}")
+      set_tests_properties(sleigh_smoke_${_case} PROPERTIES LABELS "smoke" SKIP_RETURN_CODE 77)
     endforeach()
   endif()
 
@@ -553,7 +560,8 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       add_test(NAME no_jvm_runtime
         COMMAND "${CMAKE_COMMAND}" -DMODE=runtime
                 "-DBINARY=$<TARGET_FILE:ghidra_sleigh_smoke>"
-                "-DARGS=${GHIDRA_DECOMP_SLEIGH_HOME}$<SEMICOLON>x86-64$<SEMICOLON>--expect$<SEMICOLON>${_cmake_dir}/smoke/expected/x86-64.txt"
+                "-DARGS=${GHIDRA_DECOMP_SLEIGH_HOME}$<SEMICOLON>x86-64$<SEMICOLON>--expect$<SEMICOLON>${_cmake_dir}/smoke/expected/x86-64.txt$<SEMICOLON>--spec-fingerprint$<SEMICOLON>${_smoke_fingerprint_x86-64}"
+                -DACCEPT_RC=77
                 "-DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}"
                 ${_strace_arg}
                 -P "${_cmake_dir}/NoJvmCheck.cmake")

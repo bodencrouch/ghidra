@@ -159,9 +159,9 @@ The same CMake files configure, build and test on every Ghidra release from
 in that range. Releases before 11.1 have no `slaformat.cc`, no compressed
 `.sla` files and no bundled zlib; there the build needs no zlib and exports
 an empty `GhidraDecompiler_SLA_FORMAT_VERSION`. The SLEIGH smoke expectations
-under `cmake/smoke/expected` match the x86-64, ARM Thumb and AArch64 p-code
-of every release in that range once temporaries are renamed (see Tests); a
-release whose specifications produce different p-code would fail them.
+under `cmake/smoke/expected` were recorded from this tree's specifications.
+Where another release's specifications produce different p-code, those tests
+report themselves as skipped and name both fingerprints (see Tests).
 
 ## Cross-compiling
 
@@ -185,8 +185,8 @@ host: a `.sla` file is the same whichever machine compiles it.
 | `manifest_matches_makefile_master` | manifest | Same against `GHIDRA_DECOMP_MASTER_MAKEFILE`, when set. |
 | `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). Registered when the processors that declare every language the unit tests name are selected; on current master those are x86, Toy, PowerPC, MIPS and AARCH64. |
 | `decomp_datatests` | data | `decomp_test datatests` over the `../datatests` files whose language the compiled processors provide. On current master, the default processors cover 87 of 89. |
-| `sleigh_smoke_x86-64`, `sleigh_smoke_arm-thumb`, `sleigh_smoke_aarch64` | smoke | `sleigh_smoke` disassembles and translates fixed bytes with the built `.sla` files and compares with `cmake/smoke/expected/<case>.txt`. |
-| `sleigh_smoke_self_test` | smoke | The temporary renaming used by the SLEIGH smoke comparison accepts moved temporaries and rejects changed overlaps, sizes and identities. |
+| `sleigh_smoke_x86-64`, `sleigh_smoke_arm-thumb`, `sleigh_smoke_aarch64` | smoke | `sleigh_smoke` disassembles and translates fixed bytes with the built `.sla` files and compares with `cmake/smoke/expected/<case>.txt`. Skipped, not passed, when the output differs and the specification sources are not the recorded ones. |
+| `sleigh_smoke_self_test` | smoke | The temporary renaming used by the SLEIGH smoke comparison accepts moved temporaries and rejects changed overlaps, sizes and identities; a difference is skipped only when the specification sources differ. |
 | `capability_linkage` | smoke, isolation | `decomp_smoke --check-capabilities`: `xml`, `raw`, `c-language`, and `java-language` are registered; `bfd` is absent. |
 | `no_jvm_linkage` | isolation | No built program links `libjvm`, `libjava`, `libjli` or `libjawt` (`ldd`, `otool -L` or `readelf -d`). |
 | `no_jvm_runtime` | isolation | `sleigh_smoke` runs under `env -i PATH=/usr/bin HOME=/nonexistent LANG=C`. With `strace` present, exactly one `execve` is recorded. This does not detect fork-only children or `execveat`. |
@@ -204,18 +204,28 @@ directory on every run.
 `sleigh_smoke <sleigh-home> <case>` prints one block per instruction: the
 address, mnemonic and operands, then one indented line per p-code op with
 varnodes as `space[offset:size]`. The expected files were generated once
-and reviewed by hand. The output must equal the expected file, or differ only
-in where temporaries are allocated, which changes between Ghidra releases:
+and reviewed by hand. Each starts with the SHA-256 fingerprint of the
+processor's `.slaspec` and `.sinc` files it was recorded from. The output
+must equal the expected file, or differ only in where temporaries are
+allocated, which changes between Ghidra releases:
 groups of overlapping `unique` varnodes are renamed by first use, keeping each
 varnode's offset within its group and its size, so identity, size and every
 alias and partial overlap are still compared. Everything else, including all
 other address spaces, is compared exactly. The test `sleigh_smoke_self_test`
 checks that the renaming accepts moved temporaries and rejects changed
-overlaps, sizes and identities. Only LOAD/STORE address-space host pointers
-are rendered as stable space names.
-Regenerate one with
-`$B/sleigh_smoke $B/sleigh-home x86-64 > cmake/smoke/expected/x86-64.txt`
-after a deliberate change to a spec.
+overlaps, sizes and identities. Any other difference fails the test when the
+specification sources have the recorded fingerprint. When they do not (another
+Ghidra release, or an edited specification), the test is reported as skipped
+with both fingerprints and the first differing line: the expectation does not
+describe those sources. Only LOAD/STORE address-space host pointers are
+rendered as stable space names.
+After a deliberate change to a specification, review the new output, then
+record it with the fingerprint of the current sources:
+
+```sh
+$B/sleigh_smoke $B/sleigh-home x86-64 --record "$(cat $B/smoke-fingerprints/x86-64.txt)" \
+  > cmake/smoke/expected/x86-64.txt
+```
 
 ## Sleigh home layout
 

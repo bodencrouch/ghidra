@@ -197,3 +197,24 @@ function(ghidra_sleigh_compile_specs)
     set(${ARG_OUT_VAR} "${_all_sla}" PARENT_SCOPE)
   endif()
 endfunction()
+
+# ghidra_sleigh_spec_fingerprint(<processor languages dir> <out_var>)
+#
+# SHA-256 over the names and contents of every .slaspec and .sinc file in
+# the directory, sorted by name, with CRLF line endings read as LF.  The
+# SLEIGH smoke expectations record it, so that a test run can tell whether
+# its specification sources are the ones the expectation came from.
+function(ghidra_sleigh_spec_fingerprint langdir out_var)
+  file(GLOB _files "${langdir}/*.slaspec" "${langdir}/*.sinc")
+  list(SORT _files)
+  set(_acc "")
+  foreach(_f IN LISTS _files)
+    file(READ "${_f}" _text)
+    string(REPLACE "\r\n" "\n" _text "${_text}")
+    string(SHA256 _hash "${_text}")
+    get_filename_component(_name "${_f}" NAME)
+    string(APPEND _acc "${_name} ${_hash}\n")
+  endforeach()
+  string(SHA256 _fingerprint "${_acc}")
+  set(${out_var} "${_fingerprint}" PARENT_SCOPE)
+endfunction()
