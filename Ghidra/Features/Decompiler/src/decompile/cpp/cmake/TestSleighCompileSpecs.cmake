@@ -65,6 +65,7 @@ foreach(_proc Keep Drop)
     "// sleighCompileOptions = [ '-bad-assignment' ]\n"
     "/* sleighCompileOptions = [ '-bad-block' ] */\n"
     "def example = 'https://example.invalid/*quoted*/'\n"
+    "def mentioned = 'sleighCompileOptions += [quoted-only]'\n"
     "sleighCompileOptions = [\n // '-bad-line'\n ${_options}, /* '-bad-inline' */\n]\n")
   file(WRITE "${_lang}/keep.slaspec" "${_spec}")
   file(WRITE "${_lang}/shared.sinc" "# shared include\n")
@@ -92,6 +93,11 @@ function(snapshot _tree _result)
   file(GLOB_RECURSE _files LIST_DIRECTORIES false "${_tree}/*")
   set(_state)
   foreach(_file IN LISTS _files)
+    if(IS_SYMLINK "${_file}")
+      file(READ_SYMLINK "${_file}" _destination)
+      list(APPEND _state "${_file}:symlink:${_destination}")
+      continue()
+    endif()
     file(SHA256 "${_file}" _hash)
     file(TIMESTAMP "${_file}" _mtime "%s")
     list(APPEND _state "${_file}:${_hash}:${_mtime}")
@@ -115,6 +121,58 @@ if(NOT "${_home}/${_keep}/riscv.lp64d.sla" IN_LIST _installable OR
    _installable MATCHES "stamp|owned-by-cmake")
   message(FATAL_ERROR "Incorrect installable ownership: ${_installable}")
 endif()
+
+# Reject unsupported executable uses even after a valid literal assignment.
+# Merely mentioning the variable in strings/comments remains valid above.
+file(READ "${_processors}/Keep/build.gradle" _saved_gradle)
+foreach(_mutation
+    "sleighCompileOptions += ['-t']"
+    "sleighCompileOptions << '-t'"
+    "sleighCompileOptions.add('-t')"
+    "def copied = sleighCompileOptions")
+  file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}\n${_mutation}\n")
+  snapshot("${_home}" _before)
+  reject("unsupported executable.*sleighCompileOptions" ${_configure} -B "${_build}")
+  snapshot("${_home}" _after)
+  if(NOT _before STREQUAL _after)
+    message(FATAL_ERROR "Unsupported option mutation changed the home")
+  endif()
+endforeach()
+file(WRITE "${_processors}/Keep/build.gradle" "sleighCompileOptions += ['-t']\n")
+reject("unsupported executable.*sleighCompileOptions" ${_configure} -B "${_build}")
+file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}")
+
+# Both a dangling owned leaf and a dangling ancestor must fail before any
+# ownership update/pruning; never build after injecting these links.
+foreach(_relative "${_keep}/keep.sla" "${_keep}")
+  file(RENAME "${_home}/${_relative}" "${_root}/saved-output")
+  file(CREATE_LINK "${_root}/external-missing" "${_home}/${_relative}" SYMBOLIC)
+  snapshot("${_home}" _before)
+  reject("dangling symlink" ${_configure} -B "${_build}")
+  snapshot("${_home}" _after)
+  if(NOT _before STREQUAL _after OR EXISTS "${_root}/external-missing")
+    message(FATAL_ERROR "Dangling owned symlink mutated home/external destination")
+  endif()
+  file(REMOVE "${_home}/${_relative}")
+  file(RENAME "${_root}/saved-output" "${_home}/${_relative}")
+endforeach()
+file(WRITE "${_lang}/prospective.pspec" "new support\n")
+file(CREATE_LINK "${_root}/external-missing" "${_home}/${_keep}/prospective.pspec" SYMBOLIC)
+snapshot("${_home}" _before)
+reject("dangling symlink" ${_configure} -B "${_build}")
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after OR EXISTS "${_root}/external-missing")
+  message(FATAL_ERROR "Dangling prospective output mutated home/external destination")
+endif()
+file(REMOVE "${_home}/${_keep}/prospective.pspec" "${_lang}/prospective.pspec")
+file(CREATE_LINK "${_root}/external-home-missing" "${_root}/dangling-home" SYMBOLIC)
+snapshot("${_home}" _before)
+reject("dangling symlink" ${_configure} -B "${_build}" "-DOUTPUT_HOME=${_root}/dangling-home/child")
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after OR EXISTS "${_root}/external-home-missing")
+  message(FATAL_ERROR "Dangling prospective home mutated home/external destination")
+endif()
+run(${_configure} -B "${_build}" "-DOUTPUT_HOME=${_home}")
 
 snapshot("${_home}" _before)
 reject("owned by another" ${_configure} -B "${_root}/foreign-build" "-DOUTPUT_HOME=${_home}")
