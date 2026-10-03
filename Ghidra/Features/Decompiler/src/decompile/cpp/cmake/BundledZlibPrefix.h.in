@@ -1,0 +1,26 @@
+/* ###
+ * IP: GHIDRA
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/* Private C-only preinclude. Never installed or applied to C++ sources. */
+#if defined(__cplusplus) || defined(Z_PREFIX) || defined(Z_PREFIX_SET) || defined(ZLIB_DLL) || defined(_WIN32_WCE)
+#error Unsupported bundled zlib language/prefix/DLL/WinCE configuration
+#endif
+#include "@GHIDRA_ZLIB_SOURCE@/zconf.h"
+/* zutil.h otherwise defines these names as ordinary memcpy-family macros.
+ * Reject the legacy no-memcpy branch instead of redefining those macros. */
+#if !defined(STDC) || defined(NO_MEMCPY) || defined(Z_SOLO) || defined(pyr) || defined(SMALL_MEDIUM)
+#error Unsupported bundled zlib no-memcpy configuration
+#endif
+@GHIDRA_ZLIB_MAP@

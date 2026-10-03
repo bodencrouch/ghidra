@@ -210,7 +210,50 @@ cmake --install $B --prefix /opt/ghidra-decompiler
 installs the archives, the programs, the headers under
 `include/ghidra/decompiler`, the sleigh home under
 `share/ghidra-decompiler/sleigh-home`, and a package config under
-`lib/cmake/GhidraDecompiler`. A consumer:
+`lib/cmake/GhidraDecompiler`.
+
+Language installation uses the helper's exact owned file list. A same-prefix
+reinstall, including one from a new build of this package, retires only language
+files recorded by the previous successful installation and still matching its
+saved SHA-256 digests. Reduced and empty selections remove retired owned files;
+foreign files and historical unmanifested installs are preserved. An existing
+unmanifested destination is a conflict even if its bytes match. Modified owned
+files, symlinks, corrupt state, and invalid paths fail preflight before package
+archive/header/data writes. Restore or move conflicting files deliberately;
+there is no implicit takeover mode.
+
+The active `--prefix` and `DESTDIR` select independent ownership state. Moving
+to a new prefix leaves the old installation intact. Package paths through
+symlinks or parent-traversal components are rejected. `Headers` component
+installation performs preflight but does not retire language files; the
+`SleighHome` component manages the language selection. A local prefix lock
+serializes installs. Regular-file checks use the host `test` utility on Unix
+and PowerShell on Windows. These operations support trusted local filesystems;
+normal CMake partial installation on I/O failure remains possible. An incomplete
+language write leaves a `.pending` record for explicit inspection, and there is
+no crash-atomic replacement or hostile-concurrent-mutation guarantee.
+
+Bundled zlib retains the unchanged installed headers and `LOCAL_ZLIB` layout
+contract. Its C objects use a private project-specific linked-symbol prefix,
+including internal globals; a typed private C adapter connects the unchanged
+stream types to six generated compression call sites. No prefix definitions
+are exported to C++ consumers. Audited source fingerprints fail configuration
+when the bundled inventory changes and requires review. Legacy no-memcpy,
+WinCE, ambient `Z_PREFIX`/`Z_PREFIX_SET`, and `ZLIB_DLL` configurations are
+unsupported. GNU-style and MSVC-style C preinclude options are selected by the
+compiler frontend; platform acceptance requires running that platform's tests.
+
+The C++ package requires matching source revision, compiler ABI, and exported
+configuration. Symbol separation does not promise compatibility between arbitrary
+external C++ zlib header definitions. External zlib streams must remain with
+their own implementation. The installed consumer optionally co-links an external
+static gzip implementation in a C translation unit using
+`GHIDRA_DECOMP_TEST_STATIC_ZLIB` and `GHIDRA_DECOMP_TEST_ZLIB_INCLUDE_DIR`.
+With Toy selected, it loads only installed language files and checks actual
+decompiled skip/arithmetic behavior; when Toy is excluded, that check reports
+explicit nonavailability.
+
+A consumer:
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)

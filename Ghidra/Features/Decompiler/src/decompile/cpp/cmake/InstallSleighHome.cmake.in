@@ -1,0 +1,5 @@
+set(GHIDRA_INSTALL_DATA [==[@GHIDRA_DECOMP_INSTALL_SLEIGH_HOME@]==])
+set(GHIDRA_INSTALL_SOURCE_HOME [==[@_sleigh_install_home@]==])
+set(GHIDRA_INSTALL_FILES [==[@_sleigh_install_files@]==])
+set(GHIDRA_INSTALL_PHASE preflight)
+include([==[@CMAKE_CURRENT_SOURCE_DIR@/cmake/InstallSleighHome.cmake]==])
