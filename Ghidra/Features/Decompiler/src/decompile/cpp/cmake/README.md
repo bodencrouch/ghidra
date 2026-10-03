@@ -207,6 +207,8 @@ stamps, and other files remain in their source location and are not copied or
 advertised for installation. Supporting a new upstream metadata suffix requires
 an explicit update to this list. Output-home symlinks followed by `..` resolve
 against the physical symlink target before the ownership checks.
+Only active `.ldefs` references select specifications; XML comments are ignored,
+and an unterminated comment fails before the helper changes its output home.
 Reconfiguration removes obsolete paths from that list, including files for
 removed processors, but preserves unrecorded files in the output tree.
 
@@ -293,7 +295,8 @@ rule does not promise C++ ABI compatibility across Ghidra releases.
 The package also installs `SleighCompileSpecs.cmake` and its
 `BuildSafety.cmake` dependency beside the package configuration. Include the
 helper there and provide an explicit `PROCESSORS_ROOT` when compiling another
-matching source tree.
+matching source tree, with `COMPILER ghidra::sleigh_compiler` to use the
+installed compiler target.
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)

@@ -81,7 +81,10 @@ def interpolatedLiteral = "${'sleighCompileOptions'}"
   file(WRITE "${_lang}/keep.slaspec" "${_spec}")
   file(WRITE "${_lang}/shared.sinc" "# shared include\n")
   file(WRITE "${_lang}/shared.slaspec" "# sibling include\n")
-  file(WRITE "${_lang}/languages.ldefs" "<language slafile=\"keep.sla\"/>\n")
+  file(WRITE "${_lang}/languages.ldefs"
+    "<!-- <language slafile=\"commented-missing-1.sla\"/> --><!-- adjacent -->\n"
+    "<language slafile=\"keep.sla\"/>\n"
+    "<!-- multiline\n<language slafile=\"commented-missing-2.sla\"/>\n-->\n")
 endforeach()
 set(_lang "${_processors}/Keep/data/languages")
 file(WRITE "${_lang}/riscv.lp64d.slaspec" "${_spec}")
@@ -168,6 +171,17 @@ if(NOT "${_home}/${_keep}/riscv.lp64d.sla" IN_LIST _installable OR
    _installable MATCHES "stamp|owned-by-cmake")
   message(FATAL_ERROR "Incorrect installable ownership: ${_installable}")
 endif()
+
+# An unterminated comment must fail before changing the owned home.
+file(READ "${_lang}/languages.ldefs" _saved_ldefs)
+snapshot("${_home}" _before)
+file(APPEND "${_lang}/languages.ldefs" "<!-- unterminated comment\n")
+reject("unterminated XML comment" ${_configure} -B "${_build}")
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after)
+  message(FATAL_ERROR "Unterminated XML comment changed the home")
+endif()
+file(WRITE "${_lang}/languages.ldefs" "${_saved_ldefs}")
 
 # Reject unsupported executable uses even after a valid literal assignment.
 # Merely mentioning the variable in strings/comments remains valid above.
