@@ -595,14 +595,16 @@ inline uintb minimalmask(uintb val)
 ///
 /// Sign extend \b val starting at \b bit
 /// \param val is the value to be sign-extended
-/// \param bit is the index of the bit to extend from (0=least significant bit)
+/// \param bit is the index of the bit to extend from, in the range 0 to 8*sizeof(intb)-1
 /// \return the sign extended value
 inline intb sign_extend(intb val,int4 bit)
 
 {
-  int4 sa = 8*sizeof(intb) - (bit+1);
-  val = (val << sa) >> sa;
-  return val;
+  uintb sign = (uintb)1 << bit;
+  uintb low = (uintb)val & (sign - 1);
+  if (((uintb)val & sign) == 0)
+    return (intb)low;
+  return -1 - (intb)((sign - 1) - low);
 }
 
 /// \brief Clear all bits above given bit
