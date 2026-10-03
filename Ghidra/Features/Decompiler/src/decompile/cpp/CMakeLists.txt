@@ -19,6 +19,27 @@
 
 cmake_minimum_required(VERSION 3.24)
 
+# Reject source aliases and ancestor outputs before candidate-owned writes.
+# CMake itself may create startup metadata before evaluating this guard.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildSafety.cmake")
+get_filename_component(_decompile_source "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+get_filename_component(_default_processors "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../Processors" ABSOLUTE)
+if(DEFINED GHIDRA_DECOMP_PROCESSORS_ROOT)
+  set(_source_processors "${GHIDRA_DECOMP_PROCESSORS_ROOT}")
+else()
+  set(_source_processors "${_default_processors}")
+endif()
+if(DEFINED GHIDRA_DECOMP_SLEIGH_HOME)
+  set(_output_home "${GHIDRA_DECOMP_SLEIGH_HOME}")
+else()
+  set(_output_home "${CMAKE_CURRENT_BINARY_DIR}/sleigh-home")
+endif()
+foreach(_source "${_decompile_source}" "${_source_processors}")
+  ghidra_decomp_reject_overlap("${CMAKE_CURRENT_BINARY_DIR}" "${_source}")
+  ghidra_decomp_reject_overlap("${_output_home}" "${_source}")
+  ghidra_decomp_reject_overlap("${CMAKE_CURRENT_BINARY_DIR}/.ghidra-cmake/datatests" "${_source}")
+endforeach()
+
 # ---------------------------------------------------------------------------
 # Version: Ghidra/application.properties, falling back to 0.0.0 when the cpp
 # directory is built outside a Ghidra checkout.
@@ -120,12 +141,10 @@ endif()
 if(GHIDRA_DECOMP_LOCAL_ZLIB)
   list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS LOCAL_ZLIB)
 endif()
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS LINUX _LINUX)
-elseif(WIN32)
-  # filemanage.cc and types.h select their Windows code on _WINDOWS, which
-  # the Gradle build defines together with WINDOWS.
-  list(APPEND GHIDRA_DECOMP_PUBLIC_DEFINITIONS WINDOWS _WINDOWS)
+set(GHIDRA_DECOMP_PRIVATE_DEFINITIONS)
+if(WIN32)
+  # filemanage.cc needs _WINDOWS; public types do not depend on it.
+  list(APPEND GHIDRA_DECOMP_PRIVATE_DEFINITIONS _WINDOWS)
 endif()
 
 set(GHIDRA_DECOMP_INSTALL_INCLUDEDIR "${CMAKE_INSTALL_INCLUDEDIR}/ghidra/decompiler")
@@ -141,7 +160,7 @@ function(_ghidra_decomp_compile_settings target)
   target_compile_options(${target} PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wno-sign-compare>
     $<$<CXX_COMPILER_ID:MSVC>:/EHsc /W3>)
-  target_compile_definitions(${target} PRIVATE ${GHIDRA_DECOMP_PUBLIC_DEFINITIONS})
+  target_compile_definitions(${target} PRIVATE ${GHIDRA_DECOMP_PUBLIC_DEFINITIONS} ${GHIDRA_DECOMP_PRIVATE_DEFINITIONS})
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 endfunction()
 
@@ -258,8 +277,8 @@ endif()
 # Processor specifications.
 set(_have_specs FALSE)
 if(GHIDRA_DECOMP_SPEC_PROCESSORS)
-  # Two specs at a time: x86-64 and AARCH64 each need more than 1 GB.
-  set_property(GLOBAL APPEND PROPERTY JOB_POOLS sleigh_specs=2)
+  # Large specs each need more than 1 GB; serialize them even with -j2.
+  set_property(GLOBAL APPEND PROPERTY JOB_POOLS sleigh_specs=1)
   ghidra_sleigh_compile_specs(
     TARGET ghidra_specs
     PROCESSORS ${GHIDRA_DECOMP_SPEC_PROCESSORS}
@@ -315,13 +334,34 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       -DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/manifest-regression
       -P "${_cmake_dir}/TestMakefileManifest.cmake")
   set_tests_properties(manifest_rejects_archive_drift PROPERTIES LABELS "manifest")
+  set(_spec_test_compiler)
+  if(TARGET sleigh_compiler AND NOT CMAKE_CROSSCOMPILING)
+    set(_spec_test_compiler "-DCOMPILER=$<TARGET_FILE:sleigh_compiler>")
+  else()
+    message(STATUS "sleigh_specs_incremental: metadata-only copy fallback (no runnable native compiler)")
+  endif()
   add_test(NAME sleigh_specs_incremental
     COMMAND "${CMAKE_COMMAND}"
       "-DMODULE=${_cmake_dir}/SleighCompileSpecs.cmake"
       "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cmake-tests"
+      ${_spec_test_compiler}
       -P "${_cmake_dir}/TestSleighCompileSpecs.cmake")
   set_tests_properties(sleigh_specs_incremental PROPERTIES LABELS "specs")
+  add_test(NAME build_safety_guard COMMAND "${CMAKE_COMMAND}"
+    "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+    "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cmake-tests"
+    -P "${_cmake_dir}/TestBuildSafety.cmake")
+  set_tests_properties(build_safety_guard PROPERTIES LABELS "isolation")
+  if(TARGET decomp_test AND NOT CMAKE_CROSSCOMPILING)
+    add_test(NAME data_test_guard COMMAND "${CMAKE_COMMAND}"
+      "-DBINARY=$<TARGET_FILE:decomp_test>"
+      "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DSLEIGH_HOME=${GHIDRA_DECOMP_SLEIGH_HOME}"
+      "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/cmake-tests"
+      -P "${_cmake_dir}/TestDataTests.cmake")
+    set_tests_properties(data_test_guard PROPERTIES LABELS "data;isolation")
+  endif()
   if(GHIDRA_DECOMP_MASTER_MAKEFILE)
     get_filename_component(_master_dir "${GHIDRA_DECOMP_MASTER_MAKEFILE}" DIRECTORY)
     add_test(NAME manifest_matches_makefile_master
@@ -365,27 +405,29 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
     endforeach()
     list(REMOVE_DUPLICATES _langids)
 
-    set(_datatest_dir "${CMAKE_CURRENT_BINARY_DIR}/datatests")
-    file(REMOVE_RECURSE "${_datatest_dir}")
-    file(MAKE_DIRECTORY "${_datatest_dir}")
+    file(REAL_PATH "${CMAKE_CURRENT_BINARY_DIR}" _canonical_build)
+    set(_datatest_dir "${_canonical_build}/.ghidra-cmake/datatests")
     file(GLOB _datatests CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../datatests/*.xml")
     set(_selected 0)
+    set(_selected_files)
     set(_total 0)
     foreach(_xml IN LISTS _datatests)
       math(EXPR _total "${_total} + 1")
       file(STRINGS "${_xml}" _arch_line REGEX "arch=\"" LIMIT_COUNT 1)
       if(_arch_line MATCHES "arch=\"([^\":]+:[^\":]+:[^\":]+:[^\":]+)")
         if("${CMAKE_MATCH_1}" IN_LIST _langids)
-          get_filename_component(_name "${_xml}" NAME)
-          configure_file("${_xml}" "${_datatest_dir}/${_name}" COPYONLY)
+          list(APPEND _selected_files "${_xml}")
           math(EXPR _selected "${_selected} + 1")
         endif()
       endif()
     endforeach()
+    ghidra_decomp_stage_datatests("${_datatest_dir}" ${_selected_files})
     message(STATUS "data tests: ${_selected} of ${_total} cover the compiled processors")
     if(_selected GREATER 0)
       add_test(NAME decomp_datatests
-        COMMAND decomp_test -sleighpath "${GHIDRA_DECOMP_SLEIGH_HOME}" -path "${_datatest_dir}" datatests
+        COMMAND "${CMAKE_COMMAND}" "-DBINARY=$<TARGET_FILE:decomp_test>"
+          "-DSLEIGH_HOME=${GHIDRA_DECOMP_SLEIGH_HOME}" "-DDATA_DIR=${_datatest_dir}"
+          -P "${_cmake_dir}/RunDataTests.cmake"
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
       set_tests_properties(decomp_datatests PROPERTIES LABELS "data")
     endif()
@@ -476,11 +518,21 @@ if(GHIDRA_DECOMP_INSTALL)
 
   file(GLOB _headers CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.hh" "${CMAKE_CURRENT_SOURCE_DIR}/*.h")
-  install(FILES ${_headers} DESTINATION "${GHIDRA_DECOMP_INSTALL_INCLUDEDIR}")
+  # These implementation families are absent from both installed archives.
+  # Retain the console include closure of unchanged libdecomp.hh even with
+  # console OFF; linking those optional declarations requires HAVE_CONSOLE.
+  set(_unsupported_headers ${GHIDRA_DECOMP_GHIDRA_SOURCES}
+    ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES} ${GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES}
+    ${GHIDRA_DECOMP_SLACOMP_SOURCES})
+  foreach(_name IN LISTS _unsupported_headers)
+    list(REMOVE_ITEM _headers "${CMAKE_CURRENT_SOURCE_DIR}/${_name}.hh"
+      "${CMAKE_CURRENT_SOURCE_DIR}/${_name}.h")
+  endforeach()
+  install(FILES ${_headers} DESTINATION "${GHIDRA_DECOMP_INSTALL_INCLUDEDIR}" COMPONENT Headers)
   if(GHIDRA_DECOMP_LOCAL_ZLIB)
     # compression.hh includes "../zlib/zlib.h" under LOCAL_ZLIB.
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../zlib/zlib.h" "${CMAKE_CURRENT_SOURCE_DIR}/../zlib/zconf.h"
-      DESTINATION "${GHIDRA_DECOMP_INSTALL_ZLIB_INCLUDEDIR}")
+      DESTINATION "${GHIDRA_DECOMP_INSTALL_ZLIB_INCLUDEDIR}" COMPONENT Headers)
   endif()
   if(_have_specs)
     install(DIRECTORY "${GHIDRA_DECOMP_SLEIGH_HOME}/" DESTINATION "${GHIDRA_DECOMP_INSTALL_SLEIGH_HOME}"

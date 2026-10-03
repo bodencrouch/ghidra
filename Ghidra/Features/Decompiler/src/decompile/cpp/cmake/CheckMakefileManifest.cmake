@@ -17,6 +17,9 @@
 # ghidra_decomp_check_manifest(<makefile> <source dir>) after including
 # GhidraDecompSources.cmake.
 
+cmake_policy(PUSH)
+cmake_policy(VERSION 3.24)
+
 function(_ghidra_decomp_parse_makefile_var makefile_text var out_var)
   # Match "VAR=" or "VAR =" at the start of a line.
   string(REGEX MATCH "(^|\n)${var}[ \t]*=[ \t]*([^\n]*)" _m "${makefile_text}")
@@ -193,3 +196,4 @@ if(CMAKE_SCRIPT_MODE_FILE AND CMAKE_SCRIPT_MODE_FILE STREQUAL CMAKE_CURRENT_LIST
   include("${SOURCES_CMAKE}")
   ghidra_decomp_check_manifest("${MAKEFILE}" "${SOURCE_DIR}")
 endif()
+cmake_policy(POP)
