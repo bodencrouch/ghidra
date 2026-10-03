@@ -6,7 +6,7 @@
 #     PROCESSORS <p1;p2;...>        directory names under PROCESSORS_ROOT
 #     OUTPUT_DIR <dir>              root of the generated tree
 #     [PROCESSORS_ROOT <dir>]       default: Ghidra/Processors of this checkout
-#     [COMPILER <target-or-path>]   default: sleigh_compiler target
+#     [COMPILER <target-or-path>]   default: ghidra_sleigh_compiler target
 #     [OUT_VAR <var>]               receives the list of generated .sla files
 #   )
 #
@@ -67,10 +67,12 @@ function(ghidra_sleigh_compile_specs)
       "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../../../../../../Processors" ABSOLUTE)
   endif()
   if(NOT ARG_COMPILER)
-    set(ARG_COMPILER sleigh_compiler)
+    set(ARG_COMPILER ghidra_sleigh_compiler)
   endif()
   if(TARGET "${ARG_COMPILER}")
-    set(_compiler_cmd "$<TARGET_FILE:${ARG_COMPILER}>")
+    # Name the executable target itself so that CMake substitutes its path
+    # and, when cross-compiling, prepends CROSSCOMPILING_EMULATOR.
+    set(_compiler_cmd "${ARG_COMPILER}")
     set(_compiler_dep "${ARG_COMPILER}")
   else()
     set(_compiler_cmd "${ARG_COMPILER}")

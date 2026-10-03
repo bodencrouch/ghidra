@@ -18,6 +18,7 @@
 // and optionally compare it with an expected file.
 //
 //   sleigh_smoke <sleigh-home> <case> [--expect <file>]
+//   sleigh_smoke --self-test
 //
 // <sleigh-home> is the root that holds Ghidra/Processors/<P>/data/languages.
 // <case> is one of: x86-64, arm-thumb, aarch64.
@@ -28,6 +29,12 @@
 //     [<out>] = <opcode> <in>...     one line per p-code op, where a varnode
 //                                    prints as <space>[<hex offset>:<size>]
 //
+// With --expect, the output must equal the file exactly, or differ only in
+// where temporaries are allocated: groups of overlapping unique-space
+// varnodes are renamed by first use, keeping each one's offset within its
+// group and its size (see canonicalTemporaries).  --self-test checks that
+// this renaming accepts moved temporaries and rejects any other change.
+//
 // The program mirrors sleighexample.cc: an in-memory LoadImage, a
 // ContextInternal, a Sleigh translator initialized from a DocumentStorage,
 // and AssemblyEmit/PcodeEmit subclasses.  It only uses the sla archive.
@@ -35,11 +42,15 @@
 #include "loadimage.hh"
 #include "sleigh.hh"
 
+#include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -47,6 +58,12 @@ namespace {
 using namespace ghidra;
 using std::cerr;
 using std::cout;
+using std::map;
+using std::pair;
+using std::make_pair;
+using std::sort;
+using std::unique;
+using std::strtoull;
 
 struct ContextSetting {
   const char *name;
@@ -184,9 +201,24 @@ void runCase(const string &sleighhome,const SmokeCase &sc,ostream &out)
   if (path.empty() || path[path.size()-1] != '/')
     path += '/';
   path += sc.slafile;
-  istringstream sleighdoc("<sleigh>" + path + "</sleigh>");
   DocumentStorage docstorage;
+#ifdef GHIDRA_DECOMP_XML_SLA
+  // Before Ghidra 11.1 a .sla file is an XML document.
+  Element *sleighroot = docstorage.openDocument(path)->getRoot();
+#else
+  // From Ghidra 11.1 on, a <sleigh> element names the compressed .sla file.
+  string escaped;
+  for(string::size_type i=0;i<path.size();++i) {
+    switch(path[i]) {
+    case '&': escaped += "&amp;"; break;
+    case '<': escaped += "&lt;"; break;
+    case '>': escaped += "&gt;"; break;
+    default: escaped += path[i]; break;
+    }
+  }
+  istringstream sleighdoc("<sleigh>" + escaped + "</sleigh>");
   Element *sleighroot = docstorage.parseDocument(sleighdoc)->getRoot();
+#endif
   docstorage.registerTag(sleighroot);
   trans.initialize(docstorage);
 
@@ -204,10 +236,144 @@ void runCase(const string &sleighhome,const SmokeCase &sc,ostream &out)
   }
 }
 
+/// Where the temporaries (unique space) sit is an allocation detail of a
+/// processor specification and changes between Ghidra releases.  Rename
+/// each group of overlapping temporaries to T<n>, numbered by first use, and
+/// keep each varnode's offset within its group and its size.  Identity,
+/// size and every overlap relationship between temporaries are preserved;
+/// only the absolute offsets are dropped.
+string canonicalTemporaries(const string &text)
+
+{
+  static const string prefix = "unique[0x";
+  struct Use { string::size_type begin, end; unsigned long long offset, size; string sizetext; };
+  vector<Use> uses;
+  string::size_type pos = 0;
+  while((pos = text.find(prefix,pos)) != string::npos) {
+    string::size_type colon = text.find(':',pos);
+    string::size_type close = text.find(']',pos);
+    if (colon == string::npos || close == string::npos || colon > close) {
+      pos += prefix.size();
+      continue;
+    }
+    Use use;
+    use.begin = pos;
+    use.end = close + 1;
+    use.offset = strtoull(text.substr(pos + prefix.size(),colon - pos - prefix.size()).c_str(),(char **)0,16);
+    use.sizetext = text.substr(colon + 1,close - colon - 1);
+    string sizehex = use.sizetext;
+    if (sizehex.compare(0,2,"0x") == 0)
+      sizehex = sizehex.substr(2);
+    use.size = strtoull(sizehex.c_str(),(char **)0,16);
+    uses.push_back(use);
+    pos = use.end;
+  }
+  // Group the distinct ranges by overlap.
+  vector<pair<unsigned long long,unsigned long long> > ranges;
+  for(size_t i=0;i<uses.size();++i)
+    ranges.push_back(make_pair(uses[i].offset,uses[i].offset + uses[i].size));
+  sort(ranges.begin(),ranges.end());
+  ranges.erase(unique(ranges.begin(),ranges.end()),ranges.end());
+  map<pair<unsigned long long,unsigned long long>,pair<int,unsigned long long> > group;	// range -> (group, group base)
+  int numgroups = -1;
+  unsigned long long base = 0, end = 0;
+  for(size_t i=0;i<ranges.size();++i) {
+    if (numgroups < 0 || ranges[i].first >= end) {
+      numgroups += 1;
+      base = ranges[i].first;
+      end = ranges[i].second;
+    }
+    else if (ranges[i].second > end)
+      end = ranges[i].second;
+    group[ranges[i]] = make_pair(numgroups,base);
+  }
+  // Number the groups by first use and rewrite.
+  map<int,int> order;
+  string result;
+  string::size_type copied = 0;
+  for(size_t i=0;i<uses.size();++i) {
+    pair<int,unsigned long long> g = group[make_pair(uses[i].offset,uses[i].offset + uses[i].size)];
+    if (order.find(g.first) == order.end()) {
+      int next = (int)order.size();
+      order[g.first] = next;
+    }
+    ostringstream s;
+    s << "unique[T" << dec << order[g.first] << "+0x" << hex << (uses[i].offset - g.second) << ':' << uses[i].sizetext << ']';
+    result += text.substr(copied,uses[i].begin - copied);
+    result += s.str();
+    copied = uses[i].end;
+  }
+  result += text.substr(copied);
+  return result;
+}
+
+/// The renaming must accept a pure move of the temporaries and reject any
+/// change to their identity, size or overlaps.
+int selfTest(void)
+
+{
+  struct Check { const char *name; const char *a; const char *b; bool same; };
+  static const Check checks[] = {
+    { "moved temporaries are accepted",
+      "unique[0x100:8] = COPY r\nunique[0x104:4] = COPY unique[0x100:8]\nunique[0x400:1] = COPY unique[0x104:4]\n",
+      "unique[0x9100:8] = COPY r\nunique[0x9104:4] = COPY unique[0x9100:8]\nunique[0x20:1] = COPY unique[0x9104:4]\n", true },
+    { "a removed overlap is rejected",
+      "unique[0x100:8] = COPY r\nunique[0x104:4] = COPY r\n",
+      "unique[0x100:8] = COPY r\nunique[0x300:4] = COPY r\n", false },
+    { "a new overlap is rejected",
+      "unique[0x100:4] = COPY r\nunique[0x200:4] = COPY r\n",
+      "unique[0x100:4] = COPY r\nunique[0x102:4] = COPY r\n", false },
+    { "a moved partial overlap is rejected",
+      "unique[0x100:8] = COPY r\nunique[0x104:4] = COPY r\n",
+      "unique[0x100:8] = COPY r\nunique[0x102:4] = COPY r\n", false },
+    { "a changed size is rejected",
+      "unique[0x100:8] = COPY r\n",
+      "unique[0x100:4] = COPY r\n", false },
+    { "split identity is rejected",
+      "unique[0x100:4] = COPY r\nr = COPY unique[0x100:4]\n",
+      "unique[0x100:4] = COPY r\nr = COPY unique[0x200:4]\n", false },
+    { "other spaces are compared exactly",
+      "register[0x20:8] = COPY unique[0x100:8]\n",
+      "register[0x28:8] = COPY unique[0x100:8]\n", false },
+  };
+  int failures = 0;
+  for(size_t i=0;i<sizeof(checks)/sizeof(checks[0]);++i) {
+    bool same = (canonicalTemporaries(checks[i].a) == canonicalTemporaries(checks[i].b));
+    bool ok = (same == checks[i].same);
+    cerr << (ok ? "ok: " : "FAILED: ") << checks[i].name << endl;
+    if (!ok)
+      failures += 1;
+  }
+  return failures == 0 ? 0 : 1;
+}
+
+/// Print the first line where two texts differ.
+void reportFirstDifference(const string &produced,const string &expected)
+
+{
+  istringstream a(produced);
+  istringstream b(expected);
+  string la,lb;
+  int4 lineno = 0;
+  while(true) {
+    bool ha = static_cast<bool>(getline(a,la));
+    bool hb = static_cast<bool>(getline(b,lb));
+    lineno += 1;
+    if (!ha && !hb) break;
+    if (ha != hb || la != lb) {
+      cerr << "line " << dec << lineno << ":" << endl;
+      cerr << "  produced: " << (ha ? la : string("<end>")) << endl;
+      cerr << "  expected: " << (hb ? lb : string("<end>")) << endl;
+      break;
+    }
+  }
+}
+
 int usage(const char *prog)
 
 {
   cerr << "USAGE: " << prog << " <sleigh-home> <case> [--expect <file>]" << endl;
+  cerr << "       " << prog << " --self-test" << endl;
   cerr << "cases:";
   for(int4 i=0;i<numCases;++i)
     cerr << ' ' << cases[i].name;
@@ -224,6 +390,8 @@ int main(int argc,char **argv)
   using std::cerr;
   using std::cout;
 
+  if (argc == 2 && strcmp(argv[1],"--self-test") == 0)
+    return selfTest();
   if (argc != 3 && argc != 5)
     return usage(argv[0]);
   string sleighhome(argv[1]);
@@ -268,22 +436,15 @@ int main(int argc,char **argv)
     cerr << casename << ": output matches " << expectfile << endl;
     return 0;
   }
-  cerr << casename << ": output differs from " << expectfile << endl;
-  istringstream a(produced);
-  istringstream b(expected.str());
-  string la,lb;
-  int4 lineno = 0;
-  while(true) {
-    bool ha = static_cast<bool>(getline(a,la));
-    bool hb = static_cast<bool>(getline(b,lb));
-    lineno += 1;
-    if (!ha && !hb) break;
-    if (ha != hb || la != lb) {
-      cerr << "line " << dec << lineno << ":" << endl;
-      cerr << "  produced: " << (ha ? la : string("<end>")) << endl;
-      cerr << "  expected: " << (hb ? lb : string("<end>")) << endl;
-      break;
-    }
+  string canonproduced = canonicalTemporaries(produced);
+  string canonexpected = canonicalTemporaries(expected.str());
+  if (canonproduced == canonexpected) {
+    cerr << casename << ": output matches " << expectfile
+         << " except for where temporaries are allocated" << endl;
+    return 0;
   }
+  cerr << casename << ": output differs from " << expectfile << endl;
+  cerr << "with temporaries renamed by overlapping group:" << endl;
+  reportFirstDifference(canonproduced,canonexpected);
   return 1;
 }

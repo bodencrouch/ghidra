@@ -22,9 +22,37 @@ target_link_libraries(consumer PRIVATE ghidra::decomp)
 enable_testing()
 add_test(NAME capabilities COMMAND consumer --check-capabilities)
 ]=])
+# Configure the consumer with the toolchain settings this build used.  An
+# initial cache file keeps list values such as CMAKE_PREFIX_PATH intact.
+set(init "${root}/consumer-init.cmake")
+file(WRITE "${init}" "")
+foreach(var CMAKE_TOOLCHAIN_FILE CMAKE_CXX_FLAGS CMAKE_EXE_LINKER_FLAGS CMAKE_PREFIX_PATH
+            ZLIB_ROOT CMAKE_CXX_COMPILER_LAUNCHER)
+  if(var STREQUAL "CMAKE_TOOLCHAIN_FILE")
+    set(value [==[@CMAKE_TOOLCHAIN_FILE@]==])
+  elseif(var STREQUAL "CMAKE_CXX_FLAGS")
+    set(value [==[@CMAKE_CXX_FLAGS@]==])
+  elseif(var STREQUAL "CMAKE_EXE_LINKER_FLAGS")
+    set(value [==[@CMAKE_EXE_LINKER_FLAGS@]==])
+  elseif(var STREQUAL "CMAKE_PREFIX_PATH")
+    set(value [==[@CMAKE_PREFIX_PATH@]==])
+  elseif(var STREQUAL "ZLIB_ROOT")
+    set(value [==[@ZLIB_ROOT@]==])
+  else()
+    set(value [==[@CMAKE_CXX_COMPILER_LAUNCHER@]==])
+  endif()
+  if(NOT value STREQUAL "")
+    file(APPEND "${init}" "set(${var} [==[${value}]==] CACHE STRING \"\")\n")
+  endif()
+endforeach()
+if("@CMAKE_GENERATOR_PLATFORM@" STREQUAL "")
+  set(platform)
+else()
+  set(platform -A "@CMAKE_GENERATOR_PLATFORM@")
+endif()
 execute_process(
   COMMAND "@CMAKE_COMMAND@" -S "${root}/source" -B "${root}/build"
-    -G "@CMAKE_GENERATOR@" "-DCMAKE_CXX_COMPILER=@CMAKE_CXX_COMPILER@"
+    -G "@CMAKE_GENERATOR@" ${platform} -C "${init}" "-DCMAKE_CXX_COMPILER=@CMAKE_CXX_COMPILER@"
     "-DGhidraDecompiler_DIR=${prefix}/@CMAKE_INSTALL_LIBDIR@/cmake/GhidraDecompiler"
     "-DCMAKE_BUILD_TYPE=${CONFIG}"
   RESULT_VARIABLE result)
