@@ -337,8 +337,15 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       "-DARCHIVES=$<TARGET_FILE:sla>;$<TARGET_FILE:decomp_archive>"
       "-DOBJECTS=$<TARGET_OBJECTS:ghidra_zlib_objs>"
       "-DSYMBOLS=${CMAKE_CURRENT_BINARY_DIR}/bundled-zlib/symbols.txt"
+      "-DC_COMPILER_ID=${CMAKE_C_COMPILER_ID}" "-DSANITIZE=${GHIDRA_DECOMP_SANITIZE}"
       -P "${_cmake_dir}/TestBundledZlibSymbols.cmake")
-    set_tests_properties(bundled_zlib_symbols PROPERTIES LABELS "isolation")
+    add_test(NAME bundled_zlib_symbol_guard COMMAND "${CMAKE_COMMAND}"
+      "-DWORK=${CMAKE_CURRENT_BINARY_DIR}" "-DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DCC=${CMAKE_C_COMPILER}" "-DNM=${CMAKE_NM}"
+      "-DC_COMPILER_ID=${CMAKE_C_COMPILER_ID}" "-DSANITIZE=${GHIDRA_DECOMP_SANITIZE}"
+      "-DPREFIX=${_prefix_header}" "-DSYMBOLS=${CMAKE_CURRENT_BINARY_DIR}/bundled-zlib/symbols.txt"
+      -P "${_cmake_dir}/TestBundledZlibSymbolGuard.cmake")
+    set_tests_properties(bundled_zlib_symbols bundled_zlib_symbol_guard PROPERTIES LABELS "isolation")
   endif()
   if(GHIDRA_DECOMP_LOCAL_ZLIB)
     set(_adapter_tests bundled_zlib_adapter)

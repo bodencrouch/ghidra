@@ -29,6 +29,7 @@ src/decompile/cpp/cmake/InstallSleighHome.cmake.in||GHIDRA||||END|
 src/decompile/cpp/cmake/TestInstallSleighHome.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/TestBundledZlib.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/TestBundledZlibSymbols.cmake||GHIDRA||||END|
+src/decompile/cpp/cmake/TestBundledZlibSymbolGuard.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/TestInstalledConsumer.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/consumer/CMakeLists.txt||GHIDRA||||END|
 src/decompile/cpp/cmake/consumer/toy_decompile.cc||GHIDRA||||END|
