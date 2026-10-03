@@ -1,0 +1,422 @@
+# Disposable helper regressions. COMPILER optionally selects a retained SLEIGH.
+cmake_minimum_required(VERSION 3.20)
+if(NOT MODULE OR NOT TEST_ROOT)
+  message(FATAL_ERROR "MODULE and TEST_ROOT are required")
+endif()
+set(_generator_args)
+if(GENERATOR)
+  set(_generator_args -G "${GENERATOR}")
+else()
+  set(GENERATOR "CMake default")
+endif()
+string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef _id)
+set(_root "${TEST_ROOT}/sleigh-specs-${_id}")
+set(_source "${_root}/source")
+set(_build "${_root}/build")
+set(_module_dir "${_root}/checkout/Ghidra/Features/Decompiler/src/decompile/cpp/cmake")
+set(_module "${_module_dir}/SleighCompileSpecs.cmake")
+set(_processors "${_root}/checkout/Ghidra/Processors")
+set(_home "${_build}/sleigh-home")
+set(_keep "Ghidra/Processors/Keep/data/languages")
+set(_drop "Ghidra/Processors/Drop/data/languages")
+file(MAKE_DIRECTORY "${_source}" "${_module_dir}")
+configure_file("${MODULE}" "${_module}" COPYONLY)
+get_filename_component(_original_module_dir "${MODULE}" DIRECTORY)
+configure_file("${_original_module_dir}/BuildSafety.cmake" "${_module_dir}/BuildSafety.cmake" COPYONLY)
+file(WRITE "${_source}/CMakeLists.txt" [=[
+cmake_minimum_required(VERSION 3.20)
+project(SleighIncremental NONE)
+include("${MODULE}")
+set_property(GLOBAL PROPERTY JOB_POOLS sleigh_specs=1)
+if(NOT DEFINED PROCESSORS)
+  set(PROCESSORS Keep Drop)
+endif()
+if(NOT DEFINED OUTPUT_HOME)
+  set(OUTPUT_HOME "${CMAKE_CURRENT_BINARY_DIR}/sleigh-home")
+endif()
+if(NOT HELPER_TARGET)
+  set(HELPER_TARGET specs)
+endif()
+ghidra_sleigh_compile_specs(TARGET ${HELPER_TARGET} PROCESSORS ${PROCESSORS}
+  OUTPUT_DIR "${OUTPUT_HOME}" COMPILER "${COMPILER}")
+get_target_property(_files ${HELPER_TARGET} GHIDRA_SLEIGH_INSTALLABLE_FILES)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/installable.txt" "${_files}")
+]=])
+if(COMPILER)
+  set(_options "'-l', \"-t\"")
+  set(_spec [=[
+define endian=little;
+define alignment=1;
+define space ram type=ram_space size=4 default;
+define space register type=register_space size=4;
+define register offset=0 size=4 [ r0 ];
+define token instr(8) op=(0,7);
+@include "shared.sinc"
+@include "shared.slaspec"
+:nop is op=0 { }
+]=])
+else()
+  set(COMPILER "${CMAKE_COMMAND}")
+  set(_options "'-E', \"copy\"")
+  set(_spec "fake specification\n")
+endif()
+foreach(_proc Keep Drop)
+  set(_lang "${_processors}/${_proc}/data/languages")
+  file(MAKE_DIRECTORY "${_lang}")
+  file(WRITE "${_processors}/${_proc}/build.gradle"
+    "// sleighCompileOptions = [ '-bad-assignment' ]\n"
+    "/* sleighCompileOptions = [ '-bad-block' ] */\n"
+    "def example = 'https://example.invalid/*quoted*/'\n"
+    "def mentioned = 'sleighCompileOptions += [quoted-only]'\n"
+    "sleighCompileOptions = [\n // '-bad-line'\n ${_options}, /* '-bad-inline' */\n]\n")
+  file(APPEND "${_processors}/${_proc}/build.gradle" [=[
+def plainMention = "sleighCompileOptions"
+def singleLiteral = '${sleighCompileOptions.add("-t")}'
+def escapedDollar = "\${sleighCompileOptions.add('-t')}"
+def mixedLiteral = "sleighCompileOptions ${other}"
+def interpolatedLiteral = "${'sleighCompileOptions'}"
+// def commented = "${sleighCompileOptions.add('-t')}"
+/* def blockCommented = "$sleighCompileOptions" */
+]=])
+  file(WRITE "${_lang}/keep.slaspec" "${_spec}")
+  file(WRITE "${_lang}/shared.sinc" "# shared include\n")
+  file(WRITE "${_lang}/shared.slaspec" "# sibling include\n")
+  file(WRITE "${_lang}/languages.ldefs" "<language slafile=\"keep.sla\"/>\n")
+endforeach()
+set(_lang "${_processors}/Keep/data/languages")
+file(WRITE "${_lang}/riscv.lp64d.slaspec" "${_spec}")
+file(APPEND "${_lang}/languages.ldefs" "<language slafile=\"riscv.lp64d.sla\"/>\n")
+file(WRITE "${_lang}/retired.pspec" "retired support\n")
+set(_support_names example.ldefs example.pspec example.cspec example.opinion
+  example.dwarf example.gdis example.register.info)
+set(_decoy_names toy.sla.lock toy.log .support-files.stamp foreign.txt foreign.info)
+foreach(_name IN LISTS _support_names _decoy_names)
+  file(WRITE "${_lang}/${_name}" "support-selection fixture\n")
+endforeach()
+
+# Verify literal dollar values through the parser itself; these are lexical
+# cases, not flags to pass to the real SLEIGH compiler.
+include("${MODULE}")
+file(WRITE "${_root}/literal-options.gradle" [=[
+sleighCompileOptions = ['$flag', '${flag}', "\$flag", "\${flag}"]
+]=])
+_ghidra_sleigh_options("${_root}/literal-options.gradle" _literal_options)
+set(_expected_literals [=[$flag;${flag};$flag;${flag}]=])
+if(NOT _literal_options STREQUAL _expected_literals)
+  message(FATAL_ERROR "Literal option dollar semantics changed: ${_literal_options}")
+endif()
+
+function(run)
+  execute_process(COMMAND ${ARGV} RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  if(NOT _rc EQUAL 0)
+    message(FATAL_ERROR "${ARGV}: ${_rc}\n${_out}\n${_err}\nFixture: ${_root}")
+  endif()
+endfunction()
+function(reject _reason)
+  execute_process(COMMAND ${ARGN} RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  if(_rc EQUAL 0 OR NOT "${_out}${_err}" MATCHES "${_reason}")
+    message(FATAL_ERROR "Expected failure matching '${_reason}': ${ARGN}\n${_out}\n${_err}")
+  endif()
+endfunction()
+function(snapshot _tree _result)
+  file(GLOB_RECURSE _files LIST_DIRECTORIES false "${_tree}/*")
+  set(_state)
+  foreach(_file IN LISTS _files)
+    if(IS_SYMLINK "${_file}")
+      file(READ_SYMLINK "${_file}" _destination)
+      list(APPEND _state "${_file}:symlink:${_destination}")
+      continue()
+    endif()
+    file(SHA256 "${_file}" _hash)
+    file(TIMESTAMP "${_file}" _mtime "%s")
+    list(APPEND _state "${_file}:${_hash}:${_mtime}")
+  endforeach()
+  set(${_result} "${_state}" PARENT_SCOPE)
+endfunction()
+
+set(_configure "${CMAKE_COMMAND}" -Werror=dev -Werror=deprecated
+  -S "${_source}" ${_generator_args}
+  "-DMODULE=${_module}" "-DCOMPILER=${COMPILER}")
+run(${_configure} -B "${_build}")
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+foreach(_file "${_keep}/keep.sla" "${_keep}/riscv.lp64d.sla" "${_keep}/retired.pspec" "${_drop}/keep.sla")
+  if(NOT EXISTS "${_home}/${_file}")
+    message(FATAL_ERROR "Initial build omitted ${_file}")
+  endif()
+endforeach()
+file(READ "${_build}/installable.txt" _installable)
+file(READ "${_build}/specs-owned-files.txt" _owned)
+foreach(_name IN LISTS _support_names)
+  if(NOT EXISTS "${_home}/${_keep}/${_name}" OR
+      NOT "${_home}/${_keep}/${_name}" IN_LIST _installable)
+    message(FATAL_ERROR "Valid support omitted: ${_name}")
+  endif()
+endforeach()
+foreach(_name IN LISTS _decoy_names)
+  string(FIND "${_owned}" "/${_name}\n" _owned_index)
+  if(EXISTS "${_home}/${_keep}/${_name}" OR
+      "${_home}/${_keep}/${_name}" IN_LIST _installable OR NOT _owned_index EQUAL -1)
+    message(FATAL_ERROR "Decoy became owned/installable: ${_name}")
+  endif()
+  file(READ "${_lang}/${_name}" _source_decoy)
+  if(NOT _source_decoy STREQUAL "support-selection fixture\n")
+    message(FATAL_ERROR "Source decoy changed: ${_name}")
+  endif()
+endforeach()
+if(NOT "${_home}/${_keep}/riscv.lp64d.sla" IN_LIST _installable OR
+   NOT "${_home}/${_keep}/languages.ldefs" IN_LIST _installable OR
+   _installable MATCHES "stamp|owned-by-cmake")
+  message(FATAL_ERROR "Incorrect installable ownership: ${_installable}")
+endif()
+
+# Reject unsupported executable uses even after a valid literal assignment.
+# Merely mentioning the variable in strings/comments remains valid above.
+file(READ "${_processors}/Keep/build.gradle" _saved_gradle)
+foreach(_mutation
+    "sleighCompileOptions += ['-t']"
+    "sleighCompileOptions << '-t'"
+    "sleighCompileOptions.add('-t')"
+    "def copied = sleighCompileOptions")
+  file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}\n${_mutation}\n")
+  snapshot("${_home}" _before)
+  reject("unsupported executable.*sleighCompileOptions" ${_configure} -B "${_build}")
+  snapshot("${_home}" _after)
+  if(NOT _before STREQUAL _after)
+    message(FATAL_ERROR "Unsupported option mutation changed the home")
+  endif()
+endforeach()
+file(WRITE "${_processors}/Keep/build.gradle" "sleighCompileOptions += ['-t']\n")
+reject("unsupported executable.*sleighCompileOptions" ${_configure} -B "${_build}")
+# Groovy double-quoted interpolation is executable, even within another
+# variable's initializer. Bracket arguments preserve its literal dollar signs.
+foreach(_mutation
+    [=[def x = "${sleighCompileOptions.add('-t')}" ]=]
+    [=[def x = "$sleighCompileOptions" ]=]
+    [=[def x = "$project.sleighCompileOptions" ]=]
+    [=[def x = "\\${sleighCompileOptions.add('-t')}" ]=]
+    [=[def x = "${ { -> sleighCompileOptions.add('-t') }() }" ]=]
+    [=[def x = "${ /* } */ sleighCompileOptions.add('-t') }" ]=]
+    [=[def x = "${call("nested")}" ]=])
+  # Each direct interpolation use must fail before changing the home.
+  file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}\n${_mutation}\n")
+  snapshot("${_home}" _before)
+  reject("unsupported.*sleighCompileOptions" ${_configure} -B "${_build}")
+  snapshot("${_home}" _after)
+  if(NOT _before STREQUAL _after)
+    message(FATAL_ERROR "Executable interpolation changed the home")
+  endif()
+endforeach()
+foreach(_computed
+    [=[sleighCompileOptions = ["${flag}"]]=]
+    [=[sleighCompileOptions = ["$flag"]]=])
+  file(WRITE "${_processors}/Keep/build.gradle" "${_computed}\n")
+  reject("unsupported.*sleighCompileOptions" ${_configure} -B "${_build}")
+endforeach()
+file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}")
+
+file(WRITE "${_processors}/Keep/build.gradle" [=[
+def x = "${sleighCompileOptions.add('-t')}"
+]=])
+reject("unsupported.*sleighCompileOptions" ${_configure} -B "${_build}")
+file(WRITE "${_processors}/Keep/build.gradle" [=[
+sleighCompileOptions = ["\n"]
+]=])
+reject("unsupported escape.*sleighCompileOptions" ${_configure} -B "${_build}")
+file(WRITE "${_processors}/Keep/build.gradle" "${_saved_gradle}")
+
+# Both a dangling owned leaf and a dangling ancestor must fail before any
+# ownership update/pruning; never build after injecting these links.
+foreach(_relative "${_keep}/keep.sla" "${_keep}")
+  file(RENAME "${_home}/${_relative}" "${_root}/saved-output")
+  file(CREATE_LINK "${_root}/external-missing" "${_home}/${_relative}" SYMBOLIC)
+  snapshot("${_home}" _before)
+  reject("dangling symlink" ${_configure} -B "${_build}")
+  snapshot("${_home}" _after)
+  if(NOT _before STREQUAL _after OR EXISTS "${_root}/external-missing")
+    message(FATAL_ERROR "Dangling owned symlink mutated home/external destination")
+  endif()
+  file(REMOVE "${_home}/${_relative}")
+  file(RENAME "${_root}/saved-output" "${_home}/${_relative}")
+endforeach()
+file(WRITE "${_lang}/prospective.pspec" "new support\n")
+file(CREATE_LINK "${_root}/external-missing" "${_home}/${_keep}/prospective.pspec" SYMBOLIC)
+snapshot("${_home}" _before)
+reject("dangling symlink" ${_configure} -B "${_build}")
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after OR EXISTS "${_root}/external-missing")
+  message(FATAL_ERROR "Dangling prospective output mutated home/external destination")
+endif()
+file(REMOVE "${_home}/${_keep}/prospective.pspec" "${_lang}/prospective.pspec")
+file(CREATE_LINK "${_root}/external-home-missing" "${_root}/dangling-home" SYMBOLIC)
+snapshot("${_home}" _before)
+reject("dangling symlink" ${_configure} -B "${_build}" "-DOUTPUT_HOME=${_root}/dangling-home/child")
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after OR EXISTS "${_root}/external-home-missing")
+  message(FATAL_ERROR "Dangling prospective home mutated home/external destination")
+endif()
+run(${_configure} -B "${_build}" "-DOUTPUT_HOME=${_home}")
+
+snapshot("${_home}" _before)
+reject("owned by another" ${_configure} -B "${_root}/foreign-build" "-DOUTPUT_HOME=${_home}")
+reject("owned by another" ${_configure} -B "${_build}" -DHELPER_TARGET=foreign)
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after)
+  message(FATAL_ERROR "Rejected owner mutated the home")
+endif()
+run(${_configure} -B "${_build}" -DHELPER_TARGET=specs)
+file(CREATE_LINK "${_build}" "${_root}/build-alias" SYMBOLIC RESULT _link_result)
+if(_link_result STREQUAL "0")
+  run(${_configure} -B "${_root}/build-alias")
+endif()
+file(WRITE "${_home}/.sleigh-home-owned-by-cmake" "")
+file(REMOVE "${_build}/specs-owned-home.txt")
+file(WRITE "${_home}/${_keep}/.support-files.stamp" "")
+file(APPEND "${_build}/specs-owned-files.txt" "${_home}/${_keep}/.support-files.stamp\n")
+file(WRITE "${_home}/${_keep}/toy.sla.lock" "formerly owned decoy\n")
+file(APPEND "${_build}/specs-owned-files.txt" "${_home}/${_keep}/toy.sla.lock\n")
+reject("prior ownership" ${_configure} -B "${_root}/legacy-foreign" "-DOUTPUT_HOME=${_home}")
+run(${_configure} -B "${_build}")
+file(SIZE "${_home}/.sleigh-home-owned-by-cmake" _marker_size)
+if(_marker_size EQUAL 0)
+  message(FATAL_ERROR "Legacy marker was not migrated")
+endif()
+if(EXISTS "${_home}/${_keep}/.support-files.stamp" OR EXISTS "${_home}/${_keep}/toy.sla.lock")
+  message(FATAL_ERROR "Legacy support stamp was not retired")
+endif()
+
+foreach(_include shared.slaspec shared.sinc)
+  file(TIMESTAMP "${_home}/${_keep}/keep.sla" _before "%s")
+  run("${CMAKE_COMMAND}" -E sleep 1)
+  file(APPEND "${_lang}/${_include}" "# changed include\n")
+  run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+  file(TIMESTAMP "${_home}/${_keep}/keep.sla" _after "%s")
+  if(NOT _after GREATER _before)
+    message(FATAL_ERROR "Changing ${_include} did not rebuild keep.sla")
+  endif()
+endforeach()
+snapshot("${_home}" _before)
+run("${CMAKE_COMMAND}" -E sleep 1)
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after)
+  message(FATAL_ERROR "No-op incremental build changed generated outputs")
+endif()
+file(WRITE "${_root}/old-support.pspec" "old support\n")
+run("${CMAKE_COMMAND}" -E sleep 1)
+file(APPEND "${_lang}/languages.ldefs" "\n")
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+# file(COPY) preserves timestamps; configure_file would give the new file a
+# current timestamp and fail to reproduce Make's former stamp false green.
+file(COPY "${_root}/old-support.pspec" DESTINATION "${_lang}")
+file(TIMESTAMP "${_lang}/old-support.pspec" _old_time "%s")
+file(TIMESTAMP "${_home}/${_keep}/languages.ldefs" _new_time "%s")
+if(NOT _old_time LESS _new_time)
+  message(FATAL_ERROR "Old-mtime support fixture was not older than existing output")
+endif()
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+if(NOT EXISTS "${_home}/${_keep}/old-support.pspec")
+  message(FATAL_ERROR "Old-mtime newly added support file was not built")
+endif()
+
+file(WRITE "${_home}/${_keep}/user-owned.txt" "must survive\n")
+file(WRITE "${_home}/${_drop}/user-owned.txt" "must survive too\n")
+file(WRITE "${_lang}/languages.ldefs" "<language slafile=\"keep.sla\"/>\n")
+file(REMOVE "${_lang}/retired.pspec")
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+run(${_configure} -B "${_build}" "-DPROCESSORS=Keep")
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+foreach(_file "${_keep}/riscv.lp64d.sla" "${_keep}/retired.pspec" "${_drop}/keep.sla" "${_drop}/languages.ldefs")
+  if(EXISTS "${_home}/${_file}")
+    message(FATAL_ERROR "Stale output ${_home}/${_file}")
+  endif()
+endforeach()
+file(APPEND "${_lang}/languages.ldefs" "<language slafile=\"missing.sla\"/>\n")
+snapshot("${_home}" _before)
+reject("missing.sla.*no matching" ${_configure} -B "${_build}")
+snapshot("${_home}" _after)
+if(NOT _before STREQUAL _after)
+  message(FATAL_ERROR "Missing advertised spec mutated home")
+endif()
+file(WRITE "${_lang}/languages.ldefs" "<language slafile=\"keep.sla\"/>\n")
+
+set(_new_home "${_root}/new-home")
+file(MAKE_DIRECTORY "${_new_home}")
+file(WRITE "${_new_home}/.sentinel" "must survive\n")
+reject("not empty" ${_configure} -B "${_build}" "-DOUTPUT_HOME=${_new_home}")
+file(READ "${_new_home}/.sentinel" _sentinel)
+if(NOT _sentinel STREQUAL "must survive\n" OR EXISTS "${_new_home}/.sleigh-home-owned-by-cmake")
+  message(FATAL_ERROR "Unmarked destination was modified")
+endif()
+set(_new_home "${_root}/empty-home")
+run(${_configure} -B "${_build}" "-DOUTPUT_HOME=${_new_home}")
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+foreach(_file "${_keep}/keep.sla" "${_keep}/languages.ldefs" "${_keep}/old-support.pspec")
+  if(EXISTS "${_home}/${_file}" OR NOT EXISTS "${_new_home}/${_file}")
+    message(FATAL_ERROR "Output-root transition failed for ${_file}")
+  endif()
+endforeach()
+foreach(_file "${_keep}/user-owned.txt" "${_drop}/user-owned.txt")
+  if(NOT EXISTS "${_home}/${_file}")
+    message(FATAL_ERROR "Transition removed unowned ${_file}")
+  endif()
+endforeach()
+file(WRITE "${_home}/${_keep}/keep.sla" "foreign replacement\n")
+reject("unowned file" ${_configure} -B "${_build}" "-DOUTPUT_HOME=${_home}")
+file(READ "${_home}/${_keep}/keep.sla" _replacement)
+if(NOT _replacement STREQUAL "foreign replacement\n")
+  message(FATAL_ERROR "Transition overwrote foreign output")
+endif()
+
+# Exact Atmel empty-options shape; configure only since copy needs its flags.
+file(WRITE "${_processors}/Keep/build.gradle" "sleighCompileOptions = [\n // '-l'\n /* '-t' */\n]\n")
+execute_process(COMMAND ${_configure} -B "${_build}" "-DOUTPUT_HOME=${_new_home}"
+  RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+if(NOT _rc EQUAL 0 OR NOT _out MATCHES "options: [\r\n]" OR _out MATCHES "options: -")
+  message(FATAL_ERROR "Atmel commented flags became active: ${_out}${_err}")
+endif()
+# Do not silently treat a dynamic Groovy expression as a literal list.
+file(WRITE "${_processors}/Keep/build.gradle" "sleighCompileOptions = [flags]\n")
+reject("unsupported sleighCompileOptions" ${_configure} -B "${_build}" "-DOUTPUT_HOME=${_new_home}")
+file(WRITE "${_processors}/Keep/build.gradle" "sleighCompileOptions = ['-l'] + flags\n")
+reject("standalone literal" ${_configure} -B "${_build}" "-DOUTPUT_HOME=${_new_home}")
+# Empty selections have a home identity and an explicitly empty install list.
+run(${_configure} -B "${_build}" "-DOUTPUT_HOME=${_new_home}" -DPROCESSORS=)
+run("${CMAKE_COMMAND}" --build "${_build}" --parallel 1)
+file(READ "${_build}/installable.txt" _installable)
+if(NOT _installable STREQUAL "" OR EXISTS "${_new_home}/${_keep}/keep.sla")
+  message(FATAL_ERROR "Empty selection retained owned outputs")
+endif()
+if(SOURCE_DIR)
+  # Check compatibility with the checkout's actual Gradle option declarations
+  # without compiling its production language set or evaluating Groovy.
+  get_filename_component(_real_processors "${SOURCE_DIR}/../../../../../Processors" ABSOLUTE)
+  file(GLOB _gradle_files "${_real_processors}/*/build.gradle")
+  foreach(_gradle IN LISTS _gradle_files)
+    _ghidra_sleigh_options("${_gradle}" _actual_options)
+  endforeach()
+  list(LENGTH _gradle_files _gradle_count)
+  message(STATUS "Parsed ${_gradle_count} real processor Gradle option files")
+  set(_reduced_build "${_root}/reduced-build")
+  run("${CMAKE_COMMAND}" -Werror=dev -Werror=deprecated
+    -S "${SOURCE_DIR}" -B "${_reduced_build}"
+    -DGHIDRA_DECOMP_LOCAL_ZLIB=ON -DGHIDRA_DECOMP_BUILD_TOOLS=OFF
+    -DGHIDRA_DECOMP_BUILD_TESTS=ON -DGHIDRA_DECOMP_CHECK_MANIFEST=OFF
+    -DGHIDRA_DECOMP_INSTALL=OFF -DGHIDRA_DECOMP_SPEC_PROCESSORS=x86)
+  execute_process(COMMAND "${CMAKE_CTEST_COMMAND}" --test-dir "${_reduced_build}" -N
+    RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
+  if(NOT _rc EQUAL 0 OR _out MATCHES "decomp_unittests")
+    message(FATAL_ERROR "Reduced processor selection test registration: ${_out}${_err}")
+  endif()
+endif()
+# A symlink followed by .. must mean its physical parent's home.
+file(MAKE_DIRECTORY "${_root}/physical/child")
+file(CREATE_LINK "${_root}/physical/child" "${_root}/alias" SYMBOLIC RESULT _link_result)
+if(_link_result STREQUAL "0")
+  run(${_configure} -B "${_root}/traversal-build" "-DOUTPUT_HOME=${_root}/alias/../requested-home" -DPROCESSORS=)
+  if(NOT EXISTS "${_root}/physical/requested-home/.sleigh-home-owned-by-cmake" OR
+      EXISTS "${_root}/requested-home")
+    message(FATAL_ERROR "Symlink/parent output home resolved to the wrong physical destination")
+  endif()
+endif()
+file(REMOVE_RECURSE "${_root}")
+message(STATUS "SLEIGH parser, completeness, ownership, migration and incremental regressions passed (${GENERATOR}; ${COMPILER})")
