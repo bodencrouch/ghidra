@@ -127,6 +127,16 @@ The Windows implementation receives private `_WINDOWS`; broad platform macros
 are not exported to consumers. Optimization comes from the chosen build type.
 Warnings from newer compilers are left as they are.
 
+Sanitizer instrumentation is not a claim that the inherited engine is free of
+undefined behavior. At tested source base `263160cf57db`, strict Clang 22
+`address,undefined` execution with the default C++11 standard reports a signed
+shift in the unchanged `address.hh` `sign_extend` helper (for example,
+`sign_extend(197,3)`). This build integration does not repair that engine
+issue. The separately tested C++20 Toy configuration passes its selected
+runtime cases, but does not qualify C++11 or the full native suite. These
+sanitizer runs explicitly used `detect_leaks=0`; they establish no leak-free
+teardown claim.
+
 When this directory is added to another project with `add_subdirectory`,
 `GHIDRA_DECOMP_BUILD_TESTS` and `GHIDRA_DECOMP_INSTALL` default to off and
 `GHIDRA_DECOMP_SLEIGH_HOME` is visible in the parent scope.
