@@ -156,9 +156,10 @@ function(ghidra_decomp_check_manifest makefile source_dir)
   foreach(_library LIBSLA LIBDECOMP)
     _ghidra_decomp_expand_archive("${_text}" ${_library}_NAMES _members)
     if(_library STREQUAL "LIBDECOMP")
-      # The standalone build deliberately omits the optional BFD loader.
-      list(REMOVE_ITEM _members ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES}
-        ${GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES})
+      # The BFD-off contract omits only the loader and codedata's BFD command
+      # implementation. Keep this boundary independent of catalog grouping so
+      # moving an independent console unit into a BFD group cannot hide drift.
+      list(REMOVE_ITEM _members bfd_arch loadimage_bfd codedata)
     endif()
     _ghidra_decomp_compare_set(${_library}_NAMES "${_members}"
       "${GHIDRA_DECOMP_${_library}_SOURCES}" _ok)

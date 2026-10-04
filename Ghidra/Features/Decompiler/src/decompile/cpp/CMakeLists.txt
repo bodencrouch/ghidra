@@ -599,8 +599,10 @@ if(GHIDRA_DECOMP_INSTALL)
   # These implementation families are absent from both installed archives.
   # Retain the console include closure of unchanged libdecomp.hh even with
   # console OFF; linking those optional declarations requires HAVE_CONSOLE.
+  # analyzesigs.hh includes unchanged codedata.hh. Install that declaration
+  # dependency even though the BFD-dependent codedata implementation is absent.
   set(_unsupported_headers ${GHIDRA_DECOMP_GHIDRA_SOURCES}
-    ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES} ${GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES}
+    ${GHIDRA_DECOMP_EXTRA_BFD_SOURCES}
     ${GHIDRA_DECOMP_SLACOMP_SOURCES})
   foreach(_name IN LISTS _unsupported_headers)
     list(REMOVE_ITEM _headers "${CMAKE_CURRENT_SOURCE_DIR}/${_name}.hh"
