@@ -1,9 +1,12 @@
 # Standalone CMake build of the decompiler
 
 This directory adds a CMake build for the native decompiler and SLEIGH code.
-It does not change the Gradle build and it does not modify any source file.
-It exists so the native code can be built, tested and linked from other
-programs without a JVM, Gradle or Java on the machine.
+It does not change the Gradle build or decompiler/SLEIGH algorithms. It exists
+so native code can be built, tested and linked from other programs without a
+JVM, Gradle or Java on the machine. The only existing-source edit is removal
+of an unused BFD-dependent include from `analyzesigs.cc`; its signature
+analysis implementation is otherwise unchanged and now builds in the
+BFD-independent console.
 
 ## Relationship to existing Ghidra usage
 
@@ -167,7 +170,9 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | --- | --- | --- |
 | `manifest_matches_makefile` | manifest | The source manifest equals the `Makefile` sets. |
 | `manifest_rejects_archive_drift` | manifest | Mutating only a final Makefile archive composition is rejected. |
-| `bundled_zlib_symbols`, `bundled_zlib_symbol_guard` | isolation | Audit bundled archive/object globals and reject unknown or unprefixed source globals, including instrumented C-object controls. Clang ASan metadata is accepted only for its registration flag or audited private globals defined in the same object. |
+| `nm_symbol_parser` | isolation | Exercise ELF and Mach-O portable `nm -P` rows, leading-underscore normalization, definition classification, and Itanium C++ demangling when a demangler is installed. |
+| `installed_header_contract` | install, contract | Install and compile the public header set and verify exported layout macros in all four console ON/OFF and local-zlib ON/OFF combinations, using the active CMake generator. |
+| `bundled_zlib_symbols`, `bundled_zlib_symbol_guard` | isolation | Audit bundled archive/object globals and reject unknown or unprefixed source globals, including instrumented C-object controls. Mach-O's extra C-symbol underscore is normalized. Clang ASan metadata is accepted only for its registration flag or audited private globals defined in the same object. |
 | `sleigh_specs_incremental` | specs | The module-relative processor default works from an external source directory; removed specifications and support files are retired without deleting unknown output files; a fresh install contains only retained outputs; reduced processor selections do not register the full unit suite. |
 | `manifest_matches_makefile_master` | manifest | Same against `GHIDRA_DECOMP_MASTER_MAKEFILE`, when set. |
 | `decomp_unittests` | unit | `decomp_test unittests` (the `../unittests` cases). Registered when x86, Toy, PowerPC, MIPS and AARCH64 are selected. |
@@ -176,7 +181,7 @@ cmake -DMAKEFILE=$PWD/Makefile -DSOURCE_DIR=$PWD -P cmake/CheckMakefileManifest.
 | `capability_linkage` | smoke, isolation | `decomp_smoke --check-capabilities`: `xml`, `raw`, `c-language`, and `java-language` are registered; `bfd` is absent. |
 | `no_jvm_linkage` | isolation | No built program links `libjvm`, `libjava`, `libjli` or `libjawt` (`ldd`, `otool -L` or `readelf -d`). |
 | `no_jvm_runtime` | isolation | `sleigh_smoke` runs under `env -i PATH=/usr/bin HOME=/nonexistent LANG=C`. With `strace` present, exactly one `execve` is recorded. This does not detect fork-only children or `execveat`. |
-| `no_ghidra_process_symbols` | isolation | `nm` finds no `GhidraCapability` or `GhidraCommand` symbol in `libdecomp_archive.a`. Registered only when CMake found an `nm`. |
+| `no_ghidra_process_symbols` | isolation | `nm` output is normalized and C++ names demangled before checking for `GhidraCapability` or `GhidraCommand` symbols in `libdecomp_archive.a`. Registered only when CMake found `nm` and a C++ demangler. |
 | `installed_consumer` | install, smoke | Installs into the build directory, builds a separate `find_package` consumer using only installed headers/targets, and checks capability registration. Enabled for native top-level builds with installation enabled. |
 
 Run a subset with labels, for example `ctest --test-dir $B -L smoke`.

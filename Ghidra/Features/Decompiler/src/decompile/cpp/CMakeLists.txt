@@ -326,14 +326,31 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
   enable_testing()
   set(_cmake_dir "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
   set(_test_binaries)
+  if(CMAKE_NM AND (GHIDRA_DECOMP_CONSOLE OR GHIDRA_DECOMP_LOCAL_ZLIB))
+    find_program(_ghidra_decomp_cxxfilt NAMES c++filt llvm-cxxfilt)
+    if(NOT _ghidra_decomp_cxxfilt)
+      message(FATAL_ERROR "Native symbol tests require c++filt or llvm-cxxfilt")
+    endif()
+  endif()
+  add_test(NAME nm_symbol_parser COMMAND "${CMAKE_COMMAND}"
+    -P "${_cmake_dir}/TestNmSymbolParsing.cmake")
+  set_tests_properties(nm_symbol_parser PROPERTIES LABELS "isolation")
   add_test(NAME install_home_ownership COMMAND "${CMAKE_COMMAND}"
     "-DWORK=${CMAKE_CURRENT_BINARY_DIR}" -P "${_cmake_dir}/TestInstallSleighHome.cmake")
   add_test(NAME bundled_zlib_drift COMMAND "${CMAKE_COMMAND}"
     "-DWORK=${CMAKE_CURRENT_BINARY_DIR}" "-DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}"
     -P "${_cmake_dir}/TestBundledZlib.cmake")
   set_tests_properties(install_home_ownership bundled_zlib_drift PROPERTIES LABELS "install;isolation")
+  add_test(NAME installed_header_contract COMMAND "${CMAKE_COMMAND}"
+    "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+    "-DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}"
+    "-DCXX=${CMAKE_CXX_COMPILER}"
+    "-DGENERATOR=${CMAKE_GENERATOR}"
+    -P "${_cmake_dir}/TestHeaderContract.cmake")
+  set_tests_properties(installed_header_contract PROPERTIES LABELS "install;contract")
   if(GHIDRA_DECOMP_LOCAL_ZLIB AND UNIX AND CMAKE_NM)
     add_test(NAME bundled_zlib_symbols COMMAND "${CMAKE_COMMAND}" "-DNM=${CMAKE_NM}"
+      "-DAPPLE=${APPLE}" "-DCXXFILT=${_ghidra_decomp_cxxfilt}"
       "-DARCHIVES=$<TARGET_FILE:sla>;$<TARGET_FILE:decomp_archive>"
       "-DOBJECTS=$<TARGET_OBJECTS:ghidra_zlib_objs>"
       "-DSYMBOLS=${CMAKE_CURRENT_BINARY_DIR}/bundled-zlib/symbols.txt"
@@ -341,7 +358,8 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
       -P "${_cmake_dir}/TestBundledZlibSymbols.cmake")
     add_test(NAME bundled_zlib_symbol_guard COMMAND "${CMAKE_COMMAND}"
       "-DWORK=${CMAKE_CURRENT_BINARY_DIR}" "-DSOURCE=${CMAKE_CURRENT_SOURCE_DIR}"
-      "-DCC=${CMAKE_C_COMPILER}" "-DNM=${CMAKE_NM}"
+      "-DCC=${CMAKE_C_COMPILER}" "-DNM=${CMAKE_NM}" "-DAPPLE=${APPLE}"
+      "-DCXXFILT=${_ghidra_decomp_cxxfilt}"
       "-DC_COMPILER_ID=${CMAKE_C_COMPILER_ID}" "-DSANITIZE=${GHIDRA_DECOMP_SANITIZE}"
       "-DPREFIX=${_prefix_header}" "-DSYMBOLS=${CMAKE_CURRENT_BINARY_DIR}/bundled-zlib/symbols.txt"
       -P "${_cmake_dir}/TestBundledZlibSymbolGuard.cmake")
@@ -559,7 +577,8 @@ if(GHIDRA_DECOMP_BUILD_TESTS)
 
     if(CMAKE_NM)
       add_test(NAME no_ghidra_process_symbols
-        COMMAND "${CMAKE_COMMAND}" -DMODE=symbols "-DNM=${CMAKE_NM}"
+        COMMAND "${CMAKE_COMMAND}" -DMODE=symbols "-DNM=${CMAKE_NM}" "-DAPPLE=${APPLE}"
+                "-DCXXFILT=${_ghidra_decomp_cxxfilt}"
                 "-DARCHIVE=$<TARGET_FILE:decomp_archive>"
                 "-DPATTERN=GhidraCapability|GhidraCommand"
                 -P "${_cmake_dir}/NoJvmCheck.cmake")

@@ -1,7 +1,7 @@
 # Configure-only package contract probe: no engine or SLEIGH build.
 cmake_minimum_required(VERSION 3.24)
-if(NOT SOURCE_DIR OR NOT TEST_ROOT OR NOT CXX)
-  message(FATAL_ERROR "SOURCE_DIR, TEST_ROOT and native GNU/Clang CXX are required")
+if(NOT SOURCE_DIR OR NOT TEST_ROOT OR NOT CXX OR NOT GENERATOR)
+  message(FATAL_ERROR "SOURCE_DIR, TEST_ROOT, GENERATOR and native GNU/Clang CXX are required")
 endif()
 function(run)
   execute_process(COMMAND ${ARGV} RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
@@ -17,7 +17,7 @@ foreach(console ON OFF)
   foreach(local_zlib ON OFF)
     set(build "${root}/${console}-${local_zlib}")
     set(prefix "${build}/installed")
-    run("${CMAKE_COMMAND}" -S "${SOURCE_DIR}" -B "${build}" -G Ninja
+    run("${CMAKE_COMMAND}" -S "${SOURCE_DIR}" -B "${build}" -G "${GENERATOR}"
       "-DCMAKE_CXX_COMPILER=${CXX}" "-DCMAKE_INSTALL_PREFIX=${prefix}"
       -DGHIDRA_DECOMP_BUILD_TESTS=OFF -DGHIDRA_DECOMP_BUILD_TOOLS=OFF
       -DGHIDRA_DECOMP_SPEC_PROCESSORS= -DGHIDRA_DECOMP_CPUI_DEBUG=ON

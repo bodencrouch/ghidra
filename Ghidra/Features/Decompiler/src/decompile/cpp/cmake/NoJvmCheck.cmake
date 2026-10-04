@@ -12,6 +12,7 @@
 #       or execveat calls.
 #
 #   cmake -DMODE=symbols -DNM=<nm> -DARCHIVE=<lib.a> -DPATTERN=<regex>
+#         -DCXXFILT=<c++filt> [-DAPPLE=ON]
 #         -P NoJvmCheck.cmake
 #       The archive must define no symbol matching PATTERN.  Used to prove
 #       ghidra_process.cc (GhidraCapability, GhidraCommand) is not linked.
@@ -115,15 +116,23 @@ elseif(MODE STREQUAL "runtime")
   message(STATUS "NoJvmCheck: ${BINARY} ran with an empty environment")
 
 elseif(MODE STREQUAL "symbols")
-  if(NOT NM OR NOT ARCHIVE OR NOT PATTERN)
-    message(FATAL_ERROR "NoJvmCheck: NM, ARCHIVE and PATTERN are required")
+  if(NOT NM OR NOT ARCHIVE OR NOT PATTERN OR NOT CXXFILT)
+    message(FATAL_ERROR "NoJvmCheck: NM, ARCHIVE, PATTERN and CXXFILT are required")
   endif()
-  execute_process(COMMAND "${NM}" -C --defined-only "${ARCHIVE}"
+  include("${CMAKE_CURRENT_LIST_DIR}/NmSymbols.cmake")
+  execute_process(COMMAND "${NM}" -g -P "${ARCHIVE}"
     OUTPUT_VARIABLE _out ERROR_VARIABLE _err RESULT_VARIABLE _rc)
   if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "NoJvmCheck: nm failed: ${_err}")
   endif()
-  string(REGEX MATCHALL "[^\n]*(${PATTERN})[^\n]*" _hits "${_out}")
+  ghidra_parse_nm_inventory("${_out}" "${APPLE}" _symbols _definitions)
+  ghidra_demangle_nm_symbols("${_definitions}" "${CXXFILT}" _demangled)
+  set(_hits)
+  foreach(_symbol IN LISTS _demangled)
+    if(_symbol MATCHES "${PATTERN}")
+      list(APPEND _hits "${_symbol}")
+    endif()
+  endforeach()
   if(_hits)
     list(LENGTH _hits _n)
     string(REPLACE ";" "\n" _hits "${_hits}")
