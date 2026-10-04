@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 #include "analyzesigs.hh"
-#include "loadimage_bfd.hh"
 
 namespace ghidra {
 
