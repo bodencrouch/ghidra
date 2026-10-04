@@ -72,15 +72,15 @@ set(GHIDRA_DECOMP_EXTRA_BASE_SOURCES
 # Console (command line interface) support.  decomp_console and decomp_test
 # need these.
 set(GHIDRA_DECOMP_EXTRA_CONSOLE_SOURCES
-  callgraph ifacedecomp ifaceterm interface rulecompile testfunction unify
+  analyzesigs callgraph ifacedecomp ifaceterm interface rulecompile testfunction unify
 )
 # Need <bfd.h>.
 set(GHIDRA_DECOMP_EXTRA_BFD_SOURCES
   bfd_arch loadimage_bfd
 )
-# Console commands that also need <bfd.h> (both include loadimage_bfd.hh).
+# codedata target uses BFD loader types; signature commands are independent.
 set(GHIDRA_DECOMP_EXTRA_BFD_CONSOLE_SOURCES
-  analyzesigs codedata
+  codedata
 )
 
 # Full EXTRA set, for the manifest check.

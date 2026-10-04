@@ -33,6 +33,7 @@ src/decompile/cpp/cmake/TestBundledZlibSymbolGuard.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/TestInstalledConsumer.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/consumer/CMakeLists.txt||GHIDRA||||END|
 src/decompile/cpp/cmake/consumer/toy_decompile.cc||GHIDRA||||END|
+src/decompile/cpp/cmake/consumer/signature_commands.cc||GHIDRA||||END|
 src/decompile/cpp/cmake/consumer/external_gzip.c||GHIDRA||||END|
 src/decompile/cpp/cmake/GhidraDecompSources.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/GhidraDecompilerConfig.cmake.in||GHIDRA||||END|

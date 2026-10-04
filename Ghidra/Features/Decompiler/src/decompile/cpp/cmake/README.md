@@ -49,7 +49,9 @@ The CMake build produces:
 - `libsla.a`: SLEIGH only (disassembly, p-code translation, emulation).
   Same members as `LIBSLA_NAMES` in the `Makefile`.
 - `libdecomp_archive.a`: the decompiler with SLEIGH. Same members as
-  `LIBDECOMP_NAMES` in the `Makefile`, except for the libbfd loader.
+  `LIBDECOMP_NAMES` in the `Makefile`, except for the libbfd loader and the
+  BFD-dependent `codedata` console implementation. Optional console members
+  require `GHIDRA_DECOMP_CONSOLE=ON`.
 - `ghidra::decomp`: an interface target that links `libdecomp_archive.a`
   whole. The architecture and language capabilities (`xml`, `raw`,
   `c-language`, `java-language`) register themselves from static
@@ -57,7 +59,8 @@ The CMake build produces:
 - `sleigh_compiler`: the SLEIGH compiler (`slgh_compile.cc`).
 - `decomp_console`: the interactive `consolemain.cc` front end linked to the
   standalone archive. Unlike the Makefile's `decomp_dbg`/`decomp_opt`, it does
-  not include the libbfd loader or signature-analysis console commands.
+  includes signature-analysis console commands when console support is enabled;
+  the libbfd loader and `codedata` commands remain unavailable.
 - `decomp_test`: the unit and data test runner (`test.cc`).
 - A sleigh home: compiled `.sla` files and their support files for the
   processors in `GHIDRA_DECOMP_SPEC_PROCESSORS`.
@@ -294,10 +297,22 @@ A consumer:
 
 Installed `libdecomp.hh` keeps its unchanged transitive console declarations
 so it can be parsed in both configurations. Console implementation APIs are
-linkable only when `GhidraDecompiler_HAVE_CONSOLE` is true. Header presence
-alone does not grant implementation support. JVM-facing GHIDRA, BFD loader,
-BFD console, and standalone SLEIGH compiler implementation headers are excluded
-from the archive API.
+linkable only when `GhidraDecompiler_HAVE_CONSOLE` is true. This includes
+`analyzesigs.hh`, whose unchanged transitive dependency `codedata.hh` is also
+installed for parsing. The `codedata` implementation is unavailable in this
+BFD-off package, even with console support enabled. Header presence alone does
+not grant implementation support. JVM-facing GHIDRA, BFD loader, and standalone
+SLEIGH compiler implementation headers are excluded from the archive API.
+
+The only edit to an existing implementation file removes the unused
+`loadimage_bfd.hh` include from `analyzesigs.cc`; signature code and all public
+headers remain unchanged. This permits signature commands to build without BFD
+headers. The installed consumer checks their registration and actual execution,
+and checks that unsupported console/codedata declarations do not link.
+Restoring the signature commands also preserves the legacy console's ambiguous
+`save <filename>` parsing. Use its established retained-filename `save` flow;
+this build integration does not change command parsing or assert complete CLI
+equivalence with BFD-enabled Makefile builds.
 
 `CPUI_DEBUG`, `__TERMINAL__`, and `LOCAL_ZLIB` are public build requirements
 because they affect class layouts or embedded stream types. Platform macros
