@@ -374,8 +374,11 @@ TEST(float_opTrunc_to_int) {
     FloatFormat format8(8);
 
     for(float f:float_test_values) {
-        // avoid undefined behavior
-        if((int64_t)f > std::numeric_limits<int>::max() || (int64_t)f < std::numeric_limits<int>::min())
+        // Check before converting: converting NaN, infinity, or an out-of-range
+        // floating-point value to an integer is undefined behavior.
+        double value = (double)f;
+        if(!std::isfinite(value) || value > (double)std::numeric_limits<int>::max() ||
+            value < (double)std::numeric_limits<int>::min())
             continue;
         uintb true_result = ((uintb)(int32_t)f) & 0xffffffff;
         uintb encoding = format.getEncoding(f);
