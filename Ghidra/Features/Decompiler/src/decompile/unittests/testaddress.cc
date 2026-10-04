@@ -30,6 +30,18 @@ static intb referenceSignExtend(intb value,int4 bit)
   return result;
 }
 
+static uintb referenceSignExtendBySize(uintb value,int4 sizein,int4 sizeout)
+
+{
+  uintb inputMask = sizein == sizeof(uintb) ? ~(uintb)0 : (((uintb)1 << (sizein * 8)) - 1);
+  uintb outputMask = sizeout == sizeof(uintb) ? ~(uintb)0 : (((uintb)1 << (sizeout * 8)) - 1);
+  uintb result = value & inputMask;
+  uintb sign = (uintb)1 << (sizein * 8 - 1);
+  if ((result & sign) != 0)
+    result |= outputMask ^ inputMask;
+  return result;
+}
+
 TEST(address_sign_extend) {
   ASSERT_EQUALS(sign_extend((intb)197,3),(intb)5);
   ASSERT_EQUALS(sign_extend((intb)197,2),(intb)-3);
@@ -57,6 +69,19 @@ TEST(address_sign_extend) {
     for(int4 bit=0;bit<8*sizeof(intb);++bit)
       ASSERT_EQUALS(sign_extend(value,bit),referenceSignExtend(value,bit));
   }
+}
+
+TEST(address_sign_extend_sizes) {
+  const uintb values[] = { 0, 1, 0x7f, 0x80, 0xff, 0x7fff, 0x8000,
+    0x123456789abcdef0ULL, 0xffffffffffffff80ULL, ~(uintb)0 };
+  for(int4 sizein=1;sizein<=sizeof(uintb);++sizein) {
+    for(int4 sizeout=sizein;sizeout<=sizeof(uintb);++sizeout) {
+      for(int4 i=0;i<sizeof(values)/sizeof(values[0]);++i)
+        ASSERT_EQUALS(sign_extend(values[i],sizein,sizeout),
+          referenceSignExtendBySize(values[i],sizein,sizeout));
+    }
+  }
+  ASSERT_EQUALS(sign_extend((uintb)0x80,1,4),(uintb)0xffffff80);
 }
 
 } // End namespace ghidra

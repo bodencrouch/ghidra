@@ -969,10 +969,12 @@ uintb sign_extend(uintb in,int4 sizein,int4 sizeout)
 {
   sizein = (sizein < sizeof(uintb)) ? sizein : sizeof(uintb);
   sizeout = (sizeout < sizeof(uintb)) ? sizeout : sizeof(uintb);
-  intb sval = in;
-  sval <<= (sizeof(intb) - sizein) * 8;
-  uintb res = (uintb)(sval >> (sizeout - sizein) * 8);
-  res >>= (sizeof(uintb) - sizeout)*8;
+  uintb inputMask = sizein == sizeof(uintb) ? ~(uintb)0 : (((uintb)1 << (sizein * 8)) - 1);
+  uintb outputMask = sizeout == sizeof(uintb) ? ~(uintb)0 : (((uintb)1 << (sizeout * 8)) - 1);
+  uintb res = in & inputMask;
+  uintb sign = (uintb)1 << (sizein * 8 - 1);
+  if ((res & sign) != 0)
+    res |= outputMask ^ inputMask;
   return res;
 }
 
