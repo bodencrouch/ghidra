@@ -3813,12 +3813,7 @@ int4 SleighCompile::run_compilation(const string &filein,const string &fileout)
 	return 2;
       }
 #else
-      s.flush();
-      if (!s) {
-	ostringstream errs;
-	errs << "Unable to write output file: " << fileout;
-	throw SleighError(errs.str());
-      }
+      s.close();
 #endif
     }
     else {
