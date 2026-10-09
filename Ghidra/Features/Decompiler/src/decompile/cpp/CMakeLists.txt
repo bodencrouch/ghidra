@@ -14,8 +14,10 @@
 #
 # Source lists live in cmake/GhidraDecompSources.cmake and are checked
 # against ../Makefile at configure time (cmake/CheckMakefileManifest.cmake).
-# No upstream source is modified or moved; generated parsers are the
-# committed ones.
+# No source is moved and generated parsers remain the committed ones. Existing
+# source changes remove the unused BFD-dependent include from analyzesigs.cc
+# and enable output-write checks only in the CMake-built SLEIGH compiler; the
+# legacy Make/Gradle compiler behavior is unchanged.
 
 cmake_minimum_required(VERSION 3.24)
 
@@ -291,6 +293,7 @@ endif()
 
 if(_want_sleigh_compiler)
   _ghidra_decomp_object_library(ghidra_slacomp_objs ${GHIDRA_DECOMP_SLACOMP_SOURCES})
+  target_compile_definitions(ghidra_slacomp_objs PRIVATE GHIDRA_SLEIGH_CHECK_OUTPUT_ERRORS=1)
   add_executable(sleigh_compiler $<TARGET_OBJECTS:ghidra_slacomp_objs>)
   set_target_properties(sleigh_compiler PROPERTIES OUTPUT_NAME sleigh_compiler)
   target_link_libraries(sleigh_compiler PRIVATE sla)
