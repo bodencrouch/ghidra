@@ -31,6 +31,13 @@ if(_cxxfilt)
   if(NOT _demangled MATCHES "ghidra::Compress::deflate\\(")
     message(FATAL_ERROR "Mach-O Itanium symbol did not demangle: ${_demangled}")
   endif()
+  # Exceed the common per-argument limit to guard against regressions that
+  # pass the full archive inventory as c++filt command-line arguments.
+  string(REPEAT "x" 200000 _large_symbol)
+  ghidra_demangle_nm_symbols("${_large_symbol}" "${_cxxfilt}" _large_demangled)
+  if(NOT _large_demangled STREQUAL _large_symbol)
+    message(FATAL_ERROR "Large symbol was changed by stdin demangling")
+  endif()
 endif()
 
 message(STATUS "ELF and Mach-O nm symbol rows parsed and normalized")

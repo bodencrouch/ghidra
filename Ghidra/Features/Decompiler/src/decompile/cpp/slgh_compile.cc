@@ -3806,13 +3806,20 @@ int4 SleighCompile::run_compilation(const string &filein,const string &fileout)
 	encode(encoder);
 	encoder.flush();
       }
-      s.flush();
+#ifdef GHIDRA_SLEIGH_CHECK_OUTPUT_ERRORS
       s.close();
+      if (!s) {
+	cerr << "Unable to finish output file: " << fileout << endl;
+	return 2;
+      }
+#else
+      s.flush();
       if (!s) {
 	ostringstream errs;
 	errs << "Unable to write output file: " << fileout;
 	throw SleighError(errs.str());
       }
+#endif
     }
     else {
       cerr << "No output produced" <<endl;

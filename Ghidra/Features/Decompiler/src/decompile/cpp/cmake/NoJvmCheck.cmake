@@ -125,7 +125,22 @@ elseif(MODE STREQUAL "symbols")
   if(NOT _rc EQUAL 0)
     message(FATAL_ERROR "NoJvmCheck: nm failed: ${_err}")
   endif()
+  # This is an inventory sanity check as well as a forbidden-symbol check:
+  # fail closed if nm succeeds but emits an unsupported or empty format.
+  if(NOT _out MATCHES "Funcdata")
+    message(FATAL_ERROR "NoJvmCheck: nm inventory lacks expected Funcdata definition; refusing a vacuous pass")
+  endif()
+  # Validate that the configured forbidden-name expression still covers the
+  # symbols this guard is responsible for, even when the archive has none.
+  foreach(_required_name IN ITEMS GhidraCapability GhidraCommand)
+    if(NOT _required_name MATCHES "${PATTERN}")
+      message(FATAL_ERROR "NoJvmCheck: PATTERN no longer covers ${_required_name}; refusing a vacuous pass")
+    endif()
+  endforeach()
   ghidra_parse_nm_inventory("${_out}" "${APPLE}" _symbols _definitions)
+  if(NOT _definitions)
+    message(FATAL_ERROR "NoJvmCheck: nm inventory contains no definitions; refusing a vacuous pass")
+  endif()
   ghidra_demangle_nm_symbols("${_definitions}" "${CXXFILT}" _demangled)
   set(_hits)
   foreach(_symbol IN LISTS _demangled)

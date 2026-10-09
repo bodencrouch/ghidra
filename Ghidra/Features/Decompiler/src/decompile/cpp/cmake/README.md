@@ -3,10 +3,10 @@
 This directory adds a CMake build for the native decompiler and SLEIGH code.
 It does not change the Gradle build or decompiler/SLEIGH algorithms. It exists
 so native code can be built, tested and linked from other programs without a
-JVM, Gradle or Java on the machine. The only existing-source edit is removal
-of an unused BFD-dependent include from `analyzesigs.cc`; its signature
-analysis implementation is otherwise unchanged and now builds in the
-BFD-independent console.
+JVM, Gradle or Java on the machine. Existing-source changes remove an unused
+BFD-dependent include from `analyzesigs.cc` and enable output-write checking
+only in the CMake-built SLEIGH compiler. The decompiler algorithms and legacy
+Make/Gradle compiler behavior are unchanged.
 
 ## Relationship to existing Ghidra usage
 
@@ -268,11 +268,32 @@ archive/header/data writes. Restore or move conflicting files deliberately;
 there is no implicit takeover mode.
 
 The active `--prefix` and `DESTDIR` select independent ownership state. Moving
-to a new prefix leaves the old installation intact. Package paths through
-symlinks or parent-traversal components are rejected. `Headers` component
+to a new prefix leaves the old installation intact. Dot/dot-dot components in
+the raw prefix or `DESTDIR` are rejected before normalization, so manifest
+bookkeeping cannot diverge from CMake's install destination. For direct
+installs, symlinks in the physical destination path are rejected. With
+`DESTDIR`, the composed staging path is checked instead, so an unrelated
+symlink in the host's logical prefix does not prevent a clean staged install.
+A staged rootfs install (`DESTDIR` with `--prefix /`) is supported on Unix.
+Windows staged installs are rejected explicitly; CMake documents `DESTDIR` as
+unsupported there because install prefixes normally contain drive letters.
+Direct Windows installs, including a drive-root prefix, remain supported.
+`Headers` component
 installation performs preflight but does not retire language files; the
-`SleighHome` component manages the language selection. A local prefix lock
-serializes installs. Regular-file checks use the host `test` utility on Unix
+`SleighHome` component manages the language selection. A persistent CMake
+file lock sits outside the installation/package tree, in a per-user lock
+directory (`/tmp` on Unix, `%LOCALAPPDATA%` on Windows). The Unix lock
+directory is checked for current-user ownership and restricted to owner-only
+permissions before use. Its name is derived from the normalized Sleigh-home
+ownership path, so processes managing the same state and language files share
+a lock independent of build tree, `HOME`, `TMPDIR`, or `XDG_RUNTIME_DIR`; staged
+and unstaged invocations resolving to the same home use the same lock. Lock
+files are persistent temporary metadata, not package files. If another user
+pre-creates the fallback per-UID `/tmp` directory, installation fails closed;
+the directory must be removed by its owner or an administrator before retry.
+The lock is advisory; different users are not coordinated, and installations
+through filesystem aliases that normalize to different path strings may not
+share a lock. Regular-file checks use the host `test` utility on Unix
 and PowerShell on Windows. These operations support trusted local filesystems;
 normal CMake partial installation on I/O failure remains possible. An incomplete
 language write leaves a `.pending` record for explicit inspection, and there is
@@ -309,9 +330,10 @@ BFD-off package, even with console support enabled. Header presence alone does
 not grant implementation support. JVM-facing GHIDRA, BFD loader, and standalone
 SLEIGH compiler implementation headers are excluded from the archive API.
 
-An existing implementation change removes the unused `loadimage_bfd.hh`
-include from `analyzesigs.cc`; signature code and all public headers remain
-unchanged. This permits signature commands to build without BFD headers. The
+The existing-source changes remove the unused `loadimage_bfd.hh` include from
+`analyzesigs.cc` and enable output-write checks only for the CMake-built SLEIGH
+compiler; signature code and all public headers remain unchanged. This permits
+signature commands to build without BFD headers. The
 installed consumer checks their registration and actual execution, and checks
 that unsupported console/codedata declarations do not link.
 Restoring the signature commands also preserves the legacy console's ambiguous

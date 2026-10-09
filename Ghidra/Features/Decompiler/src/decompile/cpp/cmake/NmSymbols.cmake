@@ -32,8 +32,15 @@ function(ghidra_demangle_nm_symbols symbols cxxfilt out_symbols)
     set(${out_symbols} "" PARENT_SCOPE)
     return()
   endif()
-  execute_process(COMMAND "${cxxfilt}" ${symbols}
+  # Symbol inventories can exceed the platform's argv limit. Feed the
+  # demangler on stdin instead of expanding every symbol into command args.
+  string(JOIN "\n" _input ${symbols})
+  string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef _id)
+  set(_input_file "${CMAKE_CURRENT_BINARY_DIR}/ghidra-nm-symbols-${_id}.txt")
+  file(WRITE "${_input_file}" "${_input}\n")
+  execute_process(COMMAND "${cxxfilt}" INPUT_FILE "${_input_file}"
     RESULT_VARIABLE _result OUTPUT_VARIABLE _output ERROR_VARIABLE _error)
+  file(REMOVE "${_input_file}")
   if(NOT _result EQUAL 0)
     message(FATAL_ERROR "C++ symbol demangling failed: ${_error}")
   endif()
