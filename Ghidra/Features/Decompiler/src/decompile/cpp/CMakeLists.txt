@@ -647,7 +647,7 @@ if(GHIDRA_DECOMP_INSTALL)
   write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/GhidraDecompilerConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
-    COMPATIBILITY SameMajorVersion)
+    COMPATIBILITY ExactVersion)
   install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/GhidraDecompilerConfig.cmake"
     "${CMAKE_CURRENT_BINARY_DIR}/GhidraDecompilerConfigVersion.cmake"

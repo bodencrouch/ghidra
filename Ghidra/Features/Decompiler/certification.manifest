@@ -39,9 +39,11 @@ src/decompile/cpp/cmake/GhidraDecompSources.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/GhidraDecompilerConfig.cmake.in||GHIDRA||||END|
 src/decompile/cpp/cmake/InstalledConsumer.cmake.in||GHIDRA||||END|
 src/decompile/cpp/cmake/NoJvmCheck.cmake||GHIDRA||||END|
+src/decompile/cpp/cmake/NmSymbols.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/README.md||GHIDRA||||END|
 src/decompile/cpp/cmake/SleighCompileSpecs.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/TestMakefileManifest.cmake||GHIDRA||||END|
+src/decompile/cpp/cmake/TestNmSymbolParsing.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/TestNoJvmCheck.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/TestSleighCompileSpecs.cmake||GHIDRA||||END|
 src/decompile/cpp/cmake/smoke/expected/aarch64.txt||GHIDRA||||END|

@@ -309,11 +309,11 @@ BFD-off package, even with console support enabled. Header presence alone does
 not grant implementation support. JVM-facing GHIDRA, BFD loader, and standalone
 SLEIGH compiler implementation headers are excluded from the archive API.
 
-The only edit to an existing implementation file removes the unused
-`loadimage_bfd.hh` include from `analyzesigs.cc`; signature code and all public
-headers remain unchanged. This permits signature commands to build without BFD
-headers. The installed consumer checks their registration and actual execution,
-and checks that unsupported console/codedata declarations do not link.
+An existing implementation change removes the unused `loadimage_bfd.hh`
+include from `analyzesigs.cc`; signature code and all public headers remain
+unchanged. This permits signature commands to build without BFD headers. The
+installed consumer checks their registration and actual execution, and checks
+that unsupported console/codedata declarations do not link.
 Restoring the signature commands also preserves the legacy console's ambiguous
 `save <filename>` parsing. Use its established retained-filename `save` flow;
 this build integration does not change command parsing or assert complete CLI
@@ -334,7 +334,7 @@ installed compiler target.
 ```cmake
 cmake_minimum_required(VERSION 3.24)
 project(consumer CXX)
-find_package(GhidraDecompiler 12 REQUIRED)
+find_package(GhidraDecompiler 12.3 EXACT REQUIRED CONFIG)
 add_executable(consumer main.cc)
 target_link_libraries(consumer PRIVATE ghidra::decomp)
 target_compile_definitions(consumer PRIVATE SLEIGH_HOME="${GhidraDecompiler_SLEIGH_HOME}")
