@@ -601,9 +601,12 @@ inline uintb minimalmask(uintb val)
 inline intb sign_extend(intb val,int4 bit)
 
 {
-  int4 sa = 8*sizeof(intb) - (bit+1);
-  val = (val << sa) >> sa;
-  return val;
+	uintb sign = (uintb)1 << bit;
+	uintb mask = sign | (sign - 1);
+	uintb bits = ((uintb)val) & mask;
+	if ((bits & sign) != 0)
+		return -1 - (intb)(mask ^ bits);
+	return (intb)bits;
 }
 
 /// \brief Clear all bits above given bit
